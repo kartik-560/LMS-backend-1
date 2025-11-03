@@ -132,22 +132,20 @@ app.use(async (_req, _res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-if (!process.env.VERCEL) {
-  // Test DB connection at startup
-  testConnection()
-    .then(() => {
-      app.listen(PORT, () => {
-        console.log(`🚀 Server running locally on http://localhost:${PORT}`);
-      });
-    })
-    .catch((err) => {
-      console.error(
-        "❌ Failed to connect to the database at startup:",
-        err.message || err
-      );
-      process.exit(1);
+testConnection()
+  .then(() => {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Server running on port ${PORT}`);
     });
-}
+  })
+  .catch((err) => {
+    console.error(
+      "❌ Failed to connect to the database at startup:",
+      err.message || err
+    );
+    process.exit(1);
+  });
+
 
 export default serverless(app);
 
