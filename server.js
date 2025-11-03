@@ -130,7 +130,11 @@ app.use(async (_req, _res, next) => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT;
+if (!PORT) {
+  console.error("❌ No PORT environment variable found — Railway won't expose the app.");
+  process.exit(1);
+}
 
 testConnection()
   .then(() => {
@@ -145,6 +149,7 @@ testConnection()
     );
     process.exit(1);
   });
+
 
 
 export default serverless(app);
