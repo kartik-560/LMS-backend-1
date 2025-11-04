@@ -433,6 +433,107 @@ router.post("/departments", async (req, res) => {
   }
 });
 
+router.get("/colleges/:collegeId/departments", async (req, res) => {
+  try {
+    const { collegeId } = req.params;
+
+    const departments = await prisma.department.findMany({
+      where: {
+        collegeId: collegeId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: departments,
+    });
+  } catch (error) {
+    console.error("Error fetching departments:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch departments",
+    });
+  }
+});
+
+router.post("/admin/departments-catalog/add", async (req, res) => {
+  try {
+    const { name } = req.body;
+    
+    if (!req.user || (req.user.role !== 'superadmin' && !req.user.isSuperAdmin)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only superadmins can add departments to the catalog"
+      });
+    }
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Department name is required"
+      });
+    }
+
+    // Get current catalog from settings
+    const settingRecord = await prisma.setting.findUnique({
+      where: { key: "departments_catalog" }
+    });
+
+    const currentCatalog = Array.isArray(settingRecord?.value) 
+      ? settingRecord.value 
+      : [];
+
+    // Check for duplicate (case-insensitive)
+    const deptExists = currentCatalog.some(
+      dept => {
+        const deptName = typeof dept === 'string' ? dept : dept.name;
+        return deptName.toLowerCase() === name.trim().toLowerCase();
+      }
+    );
+
+    if (deptExists) {
+      return res.status(400).json({
+        success: false,
+        message: "This department already exists in the catalog"
+      });
+    }
+
+    // Add new department to catalog
+    const newDepartment = {
+      name: name.trim(),
+      key: name.trim().toUpperCase().replace(/\s+/g, "_")
+    };
+
+    const updatedCatalog = [...currentCatalog, newDepartment];
+
+    // Update or create settings record
+    const updatedSetting = await prisma.setting.upsert({
+      where: { key: "departments_catalog" },
+      update: { value: updatedCatalog },
+      create: { 
+        key: "departments_catalog", 
+        value: updatedCatalog 
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Department added to catalog successfully",
+      data: newDepartment
+    });
+  } catch (error) {
+    console.error("Error adding department to catalog:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add department to catalog"
+    });
+  }
+});
+
 router.get("/signup/departments-catalog", async (_req, res) => {
   const items = await loadDepartmentCatalog();
   return res.json({ success: true, data: { items } });
