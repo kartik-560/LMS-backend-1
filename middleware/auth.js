@@ -32,7 +32,7 @@ export async function protect(req, res, next) {
     const token = getToken(req);
     if (!token) return res.status(401).json({ error: "Unauthorized" });
 
-    console.log(token, "token from protect");
+    // console.log(token, "token from protect");
     let decoded;
     try {
       decoded = jwt.verify(token, JWT_SECRET);
@@ -40,7 +40,7 @@ export async function protect(req, res, next) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    console.log(decoded, "decoded ");
+    // console.log(decoded, "decoded ");
     const userId =
       decoded.id || decoded.userId || decoded.uid || decoded.sub || null;
     const userEmail = decoded.email || decoded.user?.email || null;
@@ -83,7 +83,7 @@ export async function protect(req, res, next) {
     const rawRole = user.role || "";
     const role = norm(rawRole);
 
-    // Prefer DB column; if absent, fallback to permissions JSON
+  
     const effectiveCollegeId =
       user.collegeId || resolveCollegeIdFromPermissions(user.permissions);
 

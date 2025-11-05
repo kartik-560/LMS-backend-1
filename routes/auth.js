@@ -133,7 +133,7 @@ router.post("/google-login", async (req, res) => {
       });
     }
 
-    console.log(`[Google Login] Email: ${email}`);
+    // console.log(`[Google Login] Email: ${email}`);
 
     // ✅ Check registration status first
     const registration = await prisma.registration.findUnique({
@@ -192,7 +192,7 @@ router.post("/google-login", async (req, res) => {
       });
     }
 
-    console.log(`[Google Login] User logged in: ${user.id}`);
+    // console.log(`[Google Login] User logged in: ${user.id}`);
 
     // ✅ Update lastLogin
     await prisma.user.update({
@@ -264,7 +264,7 @@ router.post("/signup-google", async (req, res) => {
       });
     }
 
-    const { email, name } = payload;
+    const { email, name, sub } = payload;
 
     if (!email) {
       return res.status(400).json({
@@ -273,11 +273,12 @@ router.post("/signup-google", async (req, res) => {
       });
     }
 
-    // console.log(`[Signup Google] Email: ${email}`);
-
-    // ✅ Find registration by email
+    // ✅ Find registration by email WITH department included
     let registration = await prisma.registration.findUnique({
       where: { email },
+      include: {
+        department: true, // ✅ Include department object like in /signup/verify
+      },
     });
 
     if (!registration) {
@@ -297,59 +298,69 @@ router.post("/signup-google", async (req, res) => {
       });
     }
 
-    // ✅ Check status is PENDING
-    if (registration.status !== "PENDING") {
+    // ✅ Check status is PENDING or VERIFIED (allow both)
+    if (
+      registration.status !== "PENDING" &&
+      registration.status !== "VERIFIED"
+    ) {
       return res.status(403).json({
         success: false,
         message: "Invalid registration status. Please contact administrator.",
       });
     }
 
-    // console.log(`[Signup Google] Completing signup for: ${email}`);
-
     // ✅ Update registration - mark as COMPLETED
     registration = await prisma.registration.update({
       where: { email },
       data: {
-        status: "COMPLETED", // ✅ Changed from PENDING to COMPLETED
+        status: "COMPLETED",
         fullName: registration.fullName || name || "User",
         updatedAt: new Date(),
       },
     });
 
-    // console.log(`[Signup Google] Registration updated: ${registration.id}`);
-
-    // ✅ NOW CREATE USER RECORD - This is the key part
+    // ✅ NOW CREATE USER RECORD WITH ALL REGISTRATION DATA
     let user = await prisma.user.findUnique({
       where: { email },
     });
 
     if (!user) {
-      // ✅ Create user record for authentication
+      // ✅ Create user record with complete data from registration
       user = await prisma.user.create({
         data: {
           email,
+          googleId: sub,
           fullName: registration.fullName || name || "User",
           role: registration.role || "STUDENT",
-          isEmailVerified: true, // ✅ Mark as verified
+          isEmailVerified: true,
           isActive: true,
           authProvider: "google",
           collegeId: registration.collegeId,
           departmentId: registration.departmentId,
+          // ✅ ADD THESE FIELDS FROM REGISTRATION
+          year: registration.year,
+          mobile: registration.mobile,
+          academicYear: registration.academicYear,
+          rollNumber: registration.rollNumber,
         },
       });
-      // console.log(`[Signup Google] User created in user table: ${user.id}`);
+      console.log(`[Signup Google] User created in user table: ${user.id}`);
     } else {
-      // ✅ If user exists, just update it
+      // ✅ If user exists, update with all registration data
       user = await prisma.user.update({
         where: { email },
         data: {
           isEmailVerified: true,
           authProvider: "google",
+          googleId: sub,
           fullName: registration.fullName || name,
+          year: registration.year,
+          mobile: registration.mobile,
+          academicYear: registration.academicYear,
+          rollNumber: registration.rollNumber,
         },
       });
-      // console.log(`[Signup Google] User updated in user table: ${user.id}`);
+      console.log(`[Signup Google] User updated in user table: ${user.id}`);
     }
 
     // ✅ Verify role is set
@@ -382,6 +393,11 @@ router.post("/signup-google", async (req, res) => {
           role: user.role,
           collegeId: user.collegeId,
           departmentId: user.departmentId,
+          // ✅ INCLUDE ADDITIONAL FIELDS IN RESPONSE
+          year: user.year,
+          mobile: user.mobile,
+          academicYear: user.academicYear,
+          rollNumber: user.rollNumber,
         },
         token,
       },
@@ -463,49 +479,50 @@ router.get("/colleges/:collegeId/departments", async (req, res) => {
 router.post("/admin/departments-catalog/add", async (req, res) => {
   try {
     const { name } = req.body;
-    
-    if (!req.user || (req.user.role !== 'superadmin' && !req.user.isSuperAdmin)) {
+
+    if (
+      !req.user ||
+      (req.user.role !== "superadmin" && !req.user.isSuperAdmin)
+    ) {
       return res.status(403).json({
         success: false,
-        message: "Only superadmins can add departments to the catalog"
+        message: "Only superadmins can add departments to the catalog",
       });
     }
 
     if (!name || !name.trim()) {
       return res.status(400).json({
         success: false,
-        message: "Department name is required"
+        message: "Department name is required",
       });
     }
 
     // Get current catalog from settings
     const settingRecord = await prisma.setting.findUnique({
-      where: { key: "departments_catalog" }
+      where: { key: "departments_catalog" },
     });
 
-    const currentCatalog = Array.isArray(settingRecord?.value) 
-      ? settingRecord.value 
+    const currentCatalog = Array.isArray(settingRecord?.value)
+      ? settingRecord.value
       : [];
 
     // Check for duplicate (case-insensitive)
-    const deptExists = currentCatalog.some(
-      dept => {
-        const deptName = typeof dept === 'string' ? dept : dept.name;
-        return deptName.toLowerCase() === name.trim().toLowerCase();
-      }
-    );
+    const deptExists = currentCatalog.some((dept) => {
+      const deptName = typeof dept === "string" ? dept : dept.name;
+      return deptName.toLowerCase() === name.trim().toLowerCase();
+    });
 
     if (deptExists) {
       return res.status(400).json({
         success: false,
-        message: "This department already exists in the catalog"
+        message: "This department already exists in the catalog",
       });
     }
 
     // Add new department to catalog
     const newDepartment = {
       name: name.trim(),
-      key: name.trim().toUpperCase().replace(/\s+/g, "_")
+      key: name.trim().toUpperCase().replace(/\s+/g, "_"),
     };
 
     const updatedCatalog = [...currentCatalog, newDepartment];
@@ -514,22 +531,22 @@ router.post("/admin/departments-catalog/add", async (req, res) => {
     const updatedSetting = await prisma.setting.upsert({
       where: { key: "departments_catalog" },
       update: { value: updatedCatalog },
-      create: { 
-        key: "departments_catalog", 
-        value: updatedCatalog 
-      }
+      create: {
+        key: "departments_catalog",
+        value: updatedCatalog,
+      },
     });
 
     res.status(201).json({
       success: true,
       message: "Department added to catalog successfully",
-      data: newDepartment
+      data: newDepartment,
     });
   } catch (error) {
     console.error("Error adding department to catalog:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to add department to catalog"
+      message: "Failed to add department to catalog",
     });
   }
 });
@@ -577,12 +594,12 @@ router.post(
   ],
   async (req, res, next) => {
     try {
-      const roleUpper = String(req.body.role).trim().toLowerCase();
+      const roleLower = String(req.body.role).trim().toLowerCase();
 
       const data = {
         fullName: String(req.body.fullName).trim(),
         email: normalizeEmail(req.body.email),
-        role: roleUpper, // Registration stores uppercase roles
+        role: roleLower,
         collegeId: req.body.collegeId,
 
         // ✅ Only persist these for STUDENT; otherwise store safe empties
