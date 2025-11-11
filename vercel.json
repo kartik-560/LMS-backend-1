@@ -6,6 +6,11 @@
   "routes": [
     { "src": "/(.*)", "dest": "server.js" }
   ],
+  "functions": {
+    "server.js": {
+      "maxDuration": 300
+    }
+  },
   "installCommand": "npm ci --ignore-scripts",
   "buildCommand": "npm run build"
 }
