@@ -1,4 +1,4 @@
-# EduSphere LMS Backend API
+# PugArch LMS Backend API
 
 A comprehensive Learning Management System (LMS) backend built with Node.js, Express, Prisma, and PostgreSQL.
 
