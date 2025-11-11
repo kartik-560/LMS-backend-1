@@ -1,16 +1,12 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "server.js", "use": "@vercel/node" }
-  ],
-  "routes": [
-    { "src": "/(.*)", "dest": "server.js" }
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api" }
   ],
   "functions": {
-    "server.js": {
-      "maxDuration": 300
+    "api/index.js": {
+      "maxDuration": 60,
+      "memory": 1024
     }
-  },
-  "installCommand": "npm ci --ignore-scripts",
-  "buildCommand": "npm run build"
+  }
 }
