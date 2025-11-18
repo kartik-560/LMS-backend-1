@@ -169,6 +169,8 @@ async function courseDetailHandler(req, res) {
   }
 }
 
+
+
 router.get("/overview", requireSuperAdmin, async (_req, res) => {
   const [users, totalCourses] = await Promise.all([
     prisma.user.findMany({ select: { role: true, isActive: true } }),
@@ -589,14 +591,16 @@ router.delete("/users/:id", requireSuperAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-router.get("/courses", async (req, res) => {
+router.get("/courses", protect, async (req, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Unauthorized" });
 
-    const role = up(req.user.role);
+    const normalizedRole = norm(req.user.role || req.user.rawRole);
+    const isSuperAdminUser = isSuperAdmin(req.user);
+
     const {
-      view = role === "STUDENT" ? "enrolled" : "catalog",
-      collegeId, // optional for superadmin, required for others (or pulled from user if present)
+      view = normalizedRole === "STUDENT" ? "enrolled" : "catalog",
+      collegeId,
       search,
       status,
       category,
@@ -613,6 +617,7 @@ router.get("/courses", async (req, res) => {
       thumbnail: true,
       status: true,
       creatorId: true,
+      collegeId: true,
       category: true,
       description: true,
       createdAt: true,
@@ -629,12 +634,15 @@ router.get("/courses", async (req, res) => {
       ],
     };
 
-    if (role === "SUPERADMIN") {
+    // ✅ SUPERADMIN: sees ALL courses
+    if (normalizedRole === "SUPERADMIN" || normalizedRole === "SUPER_ADMIN" || isSuperAdminUser) {
+
       const where = { ...commonFilter };
 
       const [rows, total] = await Promise.all([
         prisma.course.findMany({
           where,
+          select: baseSelect,
           orderBy: { createdAt: "desc" },
           skip: (p - 1) * ps,
           take: ps,
@@ -642,17 +650,69 @@ router.get("/courses", async (req, res) => {
         prisma.course.count({ where }),
       ]);
 
-      return res.json({ page: p, pageSize: ps, total, data: rows });
+      return res.json({
+        page: p,
+        pageSize: ps,
+        total,
+        data: rows.map(toCoursePayload),
+      });
     }
 
-    const resolvedCollegeId = String(collegeId || req.user.collegeId || "");
-    if (!resolvedCollegeId) {
-      return res
-        .status(400)
-        .json({ error: "collegeId is required for this role" });
+    // ✅ ADMIN & INSTRUCTOR: see courses with collegeId OR assigned to their college
+    if (normalizedRole === "ADMIN" || normalizedRole === "INSTRUCTOR") {
+    
+      const userCollegeId = req.user.collegeId;
+
+      if (!userCollegeId) {
+        console.log('❌ No collegeId');
+        return res.status(400).json({
+          error: "You must be assigned to a college",
+        });
+      }
+
+      // Query: Courses where collegeId matches OR assigned to their college
+      const where = {
+        ...commonFilter,
+        OR: [
+          { collegeId: userCollegeId },  // Courses with collegeId set
+          { CoursesAssigned: { some: { collegeId: userCollegeId } } }  // Courses assigned via CoursesAssigned
+        ]
+      };
+
+
+
+      const [rows, total] = await Promise.all([
+        prisma.course.findMany({
+          where,
+          select: baseSelect,
+          orderBy: { createdAt: "desc" },
+          skip: (p - 1) * ps,
+          take: ps,
+        }),
+        prisma.course.count({ where }),
+      ]);
+
+ 
+
+      return res.json({
+        page: p,
+        pageSize: ps,
+        total,
+        data: rows.map(toCoursePayload),
+      });
     }
 
-    if (role === "STUDENT") {
+    // ✅ STUDENT: existing logic
+    if (normalizedRole === "STUDENT") {
+    
+      const resolvedCollegeId = String(collegeId || req.user.collegeId || "");
+
+      if (!resolvedCollegeId) {
+        return res.status(400).json({
+          error: "collegeId is required for this role",
+        });
+      }
+
       const sid = String(req.user.id);
 
       if (view === "catalog") {
@@ -694,11 +754,9 @@ router.get("/courses", async (req, res) => {
       const [enrolls, total] = await Promise.all([
         prisma.enrollment.findMany({
           where: whereEnroll,
-
           include: {
             course: { select: baseSelect },
           },
-
           orderBy: { createdAt: "desc" },
           skip: (p - 1) * ps,
           take: ps,
@@ -712,9 +770,19 @@ router.get("/courses", async (req, res) => {
         total,
         data: enrolls,
         enrolls,
-        test: 2,
       });
     }
+
+    // ✅ OTHER ROLES: fallback
+
+    const resolvedCollegeId = String(collegeId || req.user.collegeId || "");
+
+    if (!resolvedCollegeId) {
+      return res.status(400).json({
+        error: "collegeId is required for this role",
+      });
+    }
+
     const resolvedDepartmentId = req.user.departmentId;
 
     const whereAssigned = {
@@ -725,6 +793,7 @@ router.get("/courses", async (req, res) => {
     if (resolvedDepartmentId) {
       whereAssigned.departmentId = resolvedDepartmentId;
     }
+
     const [assignments, total] = await Promise.all([
       prisma.coursesAssigned.findMany({
         where: whereAssigned,
@@ -758,14 +827,34 @@ router.get("/courses", async (req, res) => {
   }
 });
 
-router.post("/courses", requireSuperAdmin, async (req, res) => {
+router.post("/courses", requireCourseCreation, async (req, res) => {
   const { title, thumbnail, creatorId, status, category, description } =
     req.body || {};
+
   if (!title || !creatorId)
     return res.status(400).json({ error: "title and creatorId are required" });
 
   const creator = await prisma.user.findUnique({ where: { id: creatorId } });
   if (!creator) return res.status(400).json({ error: "Invalid creatorId" });
+
+  // Determine college and superadmin status
+  const normalizedRole = norm(req.user.role || req.user.rawRole);
+  let collegeId = null;
+  let madeBySuperAdmin = isSuperAdmin(req.user);
+
+  // SuperAdmin: collegeId is optional (can be null)
+  if (madeBySuperAdmin) {
+    collegeId = req.body.collegeId || null; // Optional from request body
+  }
+  // Admin/Instructor: must have collegeId
+  else if (normalizedRole === "ADMIN" || normalizedRole === "INSTRUCTOR") {
+    collegeId = req.user.collegeId;
+    if (!collegeId) {
+      return res.status(400).json({
+        error: "You must be assigned to a college to create courses",
+      });
+    }
+  }
 
   const created = await prisma.course.create({
     data: {
@@ -773,11 +862,13 @@ router.post("/courses", requireSuperAdmin, async (req, res) => {
       thumbnail,
       status: status ?? "draft",
       creatorId,
+      collegeId, // Can be null for superadmin
       category: category ?? null,
       description: description ?? null,
-      madeBySuperAdmin: true,
+      madeBySuperAdmin,
     },
   });
+
   res.json(toCoursePayload(created));
 });
 
