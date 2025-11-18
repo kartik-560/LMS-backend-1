@@ -1,4 +1,4 @@
-import "dotenv/config.js";
+import "dotenv/config";  
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -51,8 +51,9 @@ const __dirname = path.dirname(__filename);
 // Security & essentials
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true }));
+// ✅ FIXED - Increased limit for base64 uploads
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Only use morgan in local development
 if (!process.env.VERCEL) {
