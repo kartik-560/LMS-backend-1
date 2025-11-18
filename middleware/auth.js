@@ -9,6 +9,11 @@ export const norm = (s) =>
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "_");
 
+    export function isSuperAdmin(user) {
+  const role = norm(user?.role || user?.rawRole || "");
+  return role === "SUPERADMIN" || role === "SUPER_ADMIN";
+}
+
 const getToken = (req) => {
   const auth = req.headers.authorization || "";
   if (auth.startsWith("Bearer ")) return auth.slice(7);
@@ -163,3 +168,89 @@ export const register = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+
+// Add this new middleware
+export async function requireCourseCreation(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+  
+  const userId = req.user.id;
+  const normalizedRole = norm(req.user.role || req.user.rawRole);
+  
+  // Allow superadmins
+  if (isSuperAdmin(req.user)) {
+    console.log('✅ Allowed: SuperAdmin');
+    return next();
+  }
+  
+  // For admins and instructors, check college permissions
+  if (normalizedRole === "ADMIN" || normalizedRole === "INSTRUCTOR") {
+    const collegeId = req.user.collegeId;
+    
+    if (!collegeId) {
+      console.log('❌ Denied: No college assigned');
+      return res.status(403).json({ 
+        error: "You must be assigned to a college to create courses"
+      });
+    }
+    
+    try {
+      // Fetch college with permissions
+      const college = await prisma.college.findUnique({
+        where: { id: collegeId },
+        select: {
+          id: true,
+          permissions: true  // ← Using 'permissions' instead of 'adminToggles'
+        }
+      });
+      
+      if (!college) {
+        console.log('❌ Denied: College not found');
+        return res.status(403).json({ error: "College not found" });
+      }
+      
+      // Parse permissions JSON (if it's a string)
+      let permissions = college.permissions;
+      if (typeof permissions === 'string') {
+        try {
+          permissions = JSON.parse(permissions);
+        } catch (e) {
+          console.error('Failed to parse permissions JSON:', e);
+          permissions = null;
+        }
+      }
+      
+      // Check if this user has canCreateCourses permission
+      // Structure: { "adminToggles": { "userId": { "canCreateCourses": true } } }
+      const adminToggles = permissions?.adminToggles || {};
+      const userPermissions = adminToggles[userId];
+      
+      console.log('🔍 College permissions check:', {
+        userId,
+        collegeId,
+        userPermissions,
+        canCreateCourses: userPermissions?.canCreateCourses
+      });
+      
+      if (userPermissions?.canCreateCourses === true) {
+        console.log('✅ Allowed: Admin/Instructor with canCreateCourses permission');
+        return next();
+      }
+      
+      console.log('❌ Denied: No canCreateCourses permission in college settings');
+      return res.status(403).json({ 
+        error: "You don't have permission to create courses",
+        hint: "Contact your college administrator to enable 'Create Courses' permission for your account"
+      });
+      
+    } catch (error) {
+      console.error('Error checking college permissions:', error);
+      return res.status(500).json({ error: "Failed to check permissions" });
+    }
+  }
+  
+  console.log('❌ Denied: Invalid role');
+  return res.status(403).json({ 
+    error: "You don't have permission to create courses"
+  });
+}

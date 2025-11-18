@@ -14,44 +14,67 @@ function requireAdmin(req, res, next) {
 }
 
 router.get("/overview", requireAdmin, async (req, res) => {
-  const collegeId = req.user.collegeId;
-  if (!collegeId) return res.status(400).json({ error: "No collegeId" });
+  try {
+    const collegeId = req.user.collegeId;
+    
+    if (!collegeId) {
+      return res.status(400).json({ error: "No collegeId" });
+    }
 
-  const [students, instructors, courses, activeUsers] = await Promise.all([
-    prisma.user.count({ where: { role: "student", collegeId } }),
-    prisma.user.count({ where: { role: "instructor", collegeId } }),
-    prisma.course.count({
-      where: { CoursesAssigned: { some: { collegeId } } },
-    }),
-    prisma.user.count({ where: { isActive: true, collegeId } }),
-  ]);
+    const [students, instructors, courses, activeUsers] = await Promise.all([
+      prisma.user.count({ where: { role: "student", collegeId } }),
+      prisma.user.count({ where: { role: "instructor", collegeId } }),
+      // ✅ UPDATED: Count courses with collegeId OR assigned to college
+      prisma.course.count({
+        where: {
+          OR: [
+            { collegeId: collegeId },  // Courses created by admin
+            { CoursesAssigned: { some: { collegeId } } }  // Courses assigned to college
+          ]
+        }
+      }),
+      prisma.user.count({ where: { isActive: true, collegeId } }),
+    ]);
 
-  const [completedChapters, totalChapters] = await Promise.all([
-    prisma.chapterProgress.count({
-      where: { isCompleted: true, student: { collegeId } },
-    }),
-    prisma.chapterProgress.count({
-      where: { student: { collegeId } },
-    }),
-  ]);
+    const [completedChapters, totalChapters] = await Promise.all([
+      prisma.chapterProgress.count({
+        where: { isCompleted: true, student: { collegeId } },
+      }),
+      prisma.chapterProgress.count({
+        where: { student: { collegeId } },
+      }),
+    ]);
 
-  const avgCourseCompletion =
-    totalChapters === 0
-      ? 0
-      : Math.round((completedChapters / totalChapters) * 100);
+    const avgCourseCompletion =
+      totalChapters === 0
+        ? 0
+        : Math.round((completedChapters / totalChapters) * 100);
 
-  res.json({
-    data: {
-      overview: {
-        students: students,
-        instructors: instructors,
-        courses: courses,
-        users: activeUsers,
-        avgCourseCompletion,
+    // console.log('✅ Admin overview:', {
+    //   students,
+    //   instructors,
+    //   courses,
+    //   activeUsers,
+    //   avgCourseCompletion
+    // });
+
+    res.json({
+      data: {
+        overview: {
+          students: students,
+          instructors: instructors,
+          courses: courses,
+          users: activeUsers,
+          avgCourseCompletion,
+        },
       },
-    },
-  });
+    });
+  } catch (err) {
+    console.error("GET /admin/overview error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 });
+
 
 router.get("/instructors", requireAdmin, async (req, res) => {
   const collegeId = req.user.collegeId;
@@ -163,50 +186,72 @@ router.get("/students", requireAdmin, async (req, res) => {
 
 
 router.get("/courses", requireAdmin, async (req, res) => {
-  const collegeId = req.user.collegeId;
-  const { search, status, category } = req.query;
+  try {
+    const collegeId = req.user.collegeId;
+    
+    if (!collegeId) {
+      return res.status(400).json({ 
+        error: "You must be assigned to a college" 
+      });
+    }
 
-  const where = {
-    CoursesAssigned: { some: { collegeId } },
-    ...(search ? { title: { contains: search, mode: "insensitive" } } : {}),
-    ...(status ? { status } : {}),
-    ...(category ? { category } : {}),
-  };
+    const { search, status, category } = req.query;
 
-  const rows = await prisma.course.findMany({
-    where,
-    select: {
-      id: true,
-      title: true,
-      description: true,
-      status: true,
-      thumbnail: true,
-      createdAt: true,
-      updatedAt: true,
-      _count: {
-        select: {
-          // ❌ modules (not in model)
-          chapters: true,
-          enrollments: true,
+    // Build WHERE clause: courses with collegeId OR assigned to college
+    const where = {
+      OR: [
+        { collegeId: collegeId },  // Courses created by admin with collegeId
+        { CoursesAssigned: { some: { collegeId } } }  // Courses assigned to college
+      ],
+      ...(search ? { title: { contains: search, mode: "insensitive" } } : {}),
+      ...(status ? { status } : {}),
+      ...(category ? { category } : {}),
+    };
+
+    const rows = await prisma.course.findMany({
+      where,
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        status: true,
+        thumbnail: true,
+        category: true,
+        collegeId: true,  // Include this for debugging
+        createdAt: true,
+        updatedAt: true,
+        _count: {
+          select: {
+            chapters: true,
+            enrollments: true,
+          },
         },
       },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+      orderBy: { createdAt: "desc" },
+    });
 
-  const data = rows.map((r) => ({
-    id: r.id,
-    title: r.title,
-    description: r.description,
-    status: r.status,
-    thumbnail: r.thumbnail,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-    totalChapters: r._count.chapters ?? 0,
-    studentCount: r._count.enrollments ?? 0,
-  }));
+    const data = rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      description: r.description,
+      status: r.status,
+      thumbnail: r.thumbnail,
+      category: r.category,
+      totalChapters: r._count.chapters ?? 0,
+      totalModules: 0,  // Add this if your frontend expects it
+      studentCount: r._count.enrollments ?? 0,
+      level: r.level || null,  // Add if your frontend expects it
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
 
-  res.json({ data });
+    console.log('✅ Admin courses found:', data.length);
+
+    res.json({ data });
+  } catch (err) {
+    console.error("GET /admin/courses error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 export default router;

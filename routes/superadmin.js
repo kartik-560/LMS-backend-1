@@ -1,6 +1,7 @@
 import express from "express";
 import { prisma } from "../config/prisma.js";
 
+import { protect, requireCourseCreation, norm } from "../middleware/auth.js";
 const router = express.Router();
 
 const up = (s) => String(s || "").toUpperCase();
