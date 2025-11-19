@@ -1102,6 +1102,30 @@ router.post(
   }
 );
 
+// router.get("/:collegeId/departments",
+//   [protect, authorize("SUPERADMIN", "ADMIN")],
+//   async (req, res, next) => {
+//     try {
+//       const collegeId = String(req.params.collegeId);
+//       const college = await prisma.college.findUnique({
+//         where: { id: collegeId },
+//       });
+//       if (!college)
+//         return res
+//           .status(404)
+//           .json({ success: false, message: "College not found" });
+
+//       const departments = await prisma.department.findMany({
+//         where: { collegeId },
+//         orderBy: { name: "asc" },
+//       });
+//       res.json({ success: true, data: { items: departments } });
+//     } catch (err) {
+//       next(err);
+//     }
+//   }
+// );
+
 router.get(
   "/:collegeId/departments",
   [protect, authorize("SUPERADMIN", "ADMIN")],
@@ -1120,7 +1144,60 @@ router.get(
         where: { collegeId },
         orderBy: { name: "asc" },
       });
-      res.json({ success: true, data: { items: departments } });
+
+      // Get counts
+      const [instructorCounts, studentCounts, courseCounts] = await Promise.all(
+        [
+          prisma.user.groupBy({
+            by: ["departmentId"],
+            where: {
+              departmentId: { in: departments.map((d) => d.id) },
+              role: "instructor",
+            },
+            _count: { id: true },
+          }),
+          prisma.user.groupBy({
+            by: ["departmentId"],
+            where: {
+              departmentId: { in: departments.map((d) => d.id) },
+              role: "student",
+            },
+            _count: { id: true },
+          }),
+          // Use CoursesAssigned if that's your join table
+          prisma.coursesAssigned.groupBy({
+            by: ["departmentId"],
+            where: {
+              departmentId: { in: departments.map((d) => d.id) },
+            },
+            _count: { id: true },
+          }),
+        ]
+      );
+
+      const instructorMap = Object.fromEntries(
+        instructorCounts.map((c) => [c.departmentId, c._count.id])
+      );
+      const studentMap = Object.fromEntries(
+        studentCounts.map((c) => [c.departmentId, c._count.id])
+      );
+      const courseMap = Object.fromEntries(
+        courseCounts.map((c) => [c.departmentId, c._count.id])
+      );
+
+      const departmentsWithCounts = departments.map((dept) => ({
+        id: dept.id,
+        name: dept.name,
+        description: dept.description,
+        collegeId: dept.collegeId,
+        createdAt: dept.createdAt,
+        updatedAt: dept.updatedAt,
+        instructorCount: instructorMap[dept.id] || 0,
+        studentCount: studentMap[dept.id] || 0,
+        courseCount: courseMap[dept.id] || 0,
+      }));
+
+      res.json({ success: true, data: { items: departmentsWithCounts } });
     } catch (err) {
       next(err);
     }

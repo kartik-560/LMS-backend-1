@@ -476,91 +476,211 @@ router.get("/colleges/:collegeId/departments", async (req, res) => {
   }
 });
 
-router.post("/admin/departments-catalog/add", async (req, res) => {
-  try {
-    const { name } = req.body;
+router.post(
+  "/admin/departments-catalog/add",
+  [protect, authorize("SUPERADMIN")],
+  async (req, res) => {
+    try {
+      const { name } = req.body;
 
-    if (
-      !req.user ||
-      (req.user.role !== "superadmin" && !req.user.isSuperAdmin)
-    ) {
-      return res.status(403).json({
+      if (
+        !req.user ||
+        (req.user.role !== "SUPERADMIN" && !req.user.isSuperAdmin)
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "Only superadmins can add departments to the catalog",
+        });
+      }
+
+      if (!name || !name.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Department name is required",
+        });
+      }
+
+      // Get current catalog from settings
+      const settingRecord = await prisma.setting.findUnique({
+        where: { key: "departments_catalog" },
+      });
+
+      const currentCatalog = Array.isArray(settingRecord?.value)
+        ? settingRecord.value
+        : [];
+
+      // Check for duplicate (case-insensitive)
+      const deptExists = currentCatalog.some((dept) => {
+        const deptName = typeof dept === "string" ? dept : dept.name;
+        return deptName.toLowerCase() === name.trim().toLowerCase();
+      });
+
+      if (deptExists) {
+        return res.status(400).json({
+          success: false,
+          message: "This department already exists in the catalog",
+        });
+      }
+
+      // Add new department to catalog
+      const newDepartment = {
+        name: name.trim(),
+        key: name.trim().toUpperCase().replace(/\s+/g, "_"),
+      };
+
+      const updatedCatalog = [...currentCatalog, newDepartment];
+
+      // Update or create settings record
+      const updatedSetting = await prisma.setting.upsert({
+        where: { key: "departments_catalog" },
+        update: { value: updatedCatalog },
+        create: {
+          key: "departments_catalog",
+          value: updatedCatalog,
+        },
+      });
+
+      res.status(201).json({
+        success: true,
+        message: "Department added to catalog successfully",
+        data: newDepartment,
+      });
+    } catch (error) {
+      console.error("Error adding department to catalog:", error);
+      res.status(500).json({
         success: false,
-        message: "Only superadmins can add departments to the catalog",
+        message: "Failed to add department to catalog",
       });
     }
-
-    if (!name || !name.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Department name is required",
-      });
-    }
-
-    // Get current catalog from settings
-    const settingRecord = await prisma.setting.findUnique({
-      where: { key: "departments_catalog" },
-    });
-
-    const currentCatalog = Array.isArray(settingRecord?.value)
-      ? settingRecord.value
-      : [];
-
-    // Check for duplicate (case-insensitive)
-    const deptExists = currentCatalog.some((dept) => {
-      const deptName = typeof dept === "string" ? dept : dept.name;
-      return deptName.toLowerCase() === name.trim().toLowerCase();
-    });
-
-    if (deptExists) {
-      return res.status(400).json({
-        success: false,
-        message: "This department already exists in the catalog",
-      });
-    }
-
-    // Add new department to catalog
-    const newDepartment = {
-      name: name.trim(),
-      key: name.trim().toUpperCase().replace(/\s+/g, "_"),
-    };
-
-    const updatedCatalog = [...currentCatalog, newDepartment];
-
-    // Update or create settings record
-    const updatedSetting = await prisma.setting.upsert({
-      where: { key: "departments_catalog" },
-      update: { value: updatedCatalog },
-      create: {
-        key: "departments_catalog",
-        value: updatedCatalog,
-      },
-    });
-
-    res.status(201).json({
-      success: true,
-      message: "Department added to catalog successfully",
-      data: newDepartment,
-    });
-  } catch (error) {
-    console.error("Error adding department to catalog:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to add department to catalog",
-    });
   }
-});
+);
 
 router.get("/signup/departments-catalog", async (_req, res) => {
   const items = await loadDepartmentCatalog();
   return res.json({ success: true, data: { items } });
 });
 
+// router.post(
+//   "/registrations",
+//   [
+//     protect,
+//     authorize("SUPERADMIN", "ADMIN"),
+//     body("fullName").exists().trim().isLength({ min: 2, max: 150 }),
+//     body("email").exists().isEmail(),
+//     body("role").exists().isString(),
+//     body("year").optional().isString(),
+//     body("academicYear").optional().isString(),
+//     body("rollNumber").optional().isString(),
+//     body("mobile")
+//       .optional({ checkFalsy: true })
+//       .isMobilePhone("en-IN")
+//       .withMessage("Please provide a valid 10-digit Indian mobile number"),
+
+//     body("collegeId").exists().isString(),
+//     body("departmentId").optional().isString(),
+
+//     body("role").custom((value, { req }) => {
+//       const roleLower = String(value || "").toLowerCase();
+//       if (!["student", "instructor", "admin"].includes(roleLower)) {
+//         throw new Error("role must be STUDENT | INSTRUCTOR | ADMIN");
+//       }
+//       if (roleLower === "student") {
+//         if (!req.body.departmentId)
+//           throw new Error("departmentId is required for STUDENT");
+//         if (!req.body.year) throw new Error("year is required for STUDENT");
+//         if (!req.body.academicYear)
+//           throw new Error("academicYear is required for STUDENT");
+//       }
+//       return true;
+//     }),
+
+//     handleValidationErrors,
+//   ],
+//   async (req, res, next) => {
+//     try {
+//       const roleLower = String(req.body.role).trim().toLowerCase();
+
+//       const data = {
+//         fullName: String(req.body.fullName).trim(),
+//         email: normalizeEmail(req.body.email),
+//         role: roleLower,
+//         collegeId: req.body.collegeId,
+
+//         // ✅ Only persist these for STUDENT; otherwise store safe empties
+//         year: roleLower === "student" ? String(req.body.year) : "",
+//         academicYear:
+//           roleLower === "student" ? String(req.body.academicYear) : "",
+//         rollNumber:
+//           roleLower === "student" && req.body.rollNumber
+//             ? String(req.body.rollNumber)
+//             : null,
+
+//         departmentId:
+//           roleLower === "student" || roleLower === "instructor"
+//             ? String(req.body.departmentId)
+//             : null,
+
+//         mobile: req.body.mobile || null,
+
+//         status: "PENDING",
+//       };
+
+//       // Validate college
+//       const college = await prisma.college.findUnique({
+//         where: { id: data.collegeId },
+//       });
+//       if (!college)
+//         return res
+//           .status(404)
+//           .json({ success: false, message: "College not found" });
+
+//       // For STUDENT: ensure department belongs to this college
+//       if (roleLower === "student") {
+//         const dept = await prisma.department.findUnique({
+//           where: { id: String(req.body.departmentId) },
+//         });
+//         if (!dept || dept.collegeId !== data.collegeId) {
+//           return res.status(400).json({
+//             success: false,
+//             message: "departmentId must belong to the selected college",
+//           });
+//         }
+//       }
+
+//       const created = await prisma.registration.create({ data });
+
+//       // Welcome email prompting OTP signup
+//       try {
+//         await sendEmail({
+//           to: data.email,
+//           subject: "Welcome! Complete your account",
+//           text: `Hi ${data.fullName}, you've been registered as ${data.role}. To activate your account, request an OTP at ${appBase}/signup.`,
+//           html: `<p>Hi ${data.fullName},</p>
+//                   <p>You’ve been registered as <b>${data.role}</b>.</p>
+//                   <p><a href="${appBase}/signup">Click here</a> to request an OTP and complete your account.</p>`,
+//         });
+//       } catch (e) {
+//         console.warn("[registrations] welcome email failed:", e?.message || e);
+//       }
+
+//       res.status(201).json({ success: true, data: { registration: created } });
+//     } catch (err) {
+//       if (err.code === "P2002")
+//         return res.status(400).json({
+//           success: false,
+//           message:
+//             "Registration exists for this email or (college, rollNumber)",
+//         });
+//       next(err);
+//     }
+//   }
+// );
+
 router.post(
   "/registrations",
   [
     protect,
-    authorize("SUPERADMIN"),
+    authorize("SUPERADMIN", "ADMIN"),
     body("fullName").exists().trim().isLength({ min: 2, max: 150 }),
     body("email").exists().isEmail(),
     body("role").exists().isString(),
@@ -587,6 +707,15 @@ router.post(
         if (!req.body.academicYear)
           throw new Error("academicYear is required for STUDENT");
       }
+
+      if (req.user.role === "ADMIN" || req.user.role === "admin") {
+        if (req.body.collegeId !== req.user.collegeId) {
+          throw new Error(
+            "Admins can only register users for their own college"
+          );
+        }
+      }
+
       return true;
     }),
 
@@ -596,13 +725,99 @@ router.post(
     try {
       const roleLower = String(req.body.role).trim().toLowerCase();
 
+      const collegeId = req.body.collegeId;
+
+      // Get college with limits
+      const college = await prisma.college.findUnique({
+        where: { id: collegeId },
+        select: {
+          id: true,
+          name: true,
+          studentLimit: true,
+          instructorLimit: true,
+          adminLimit: true,
+        },
+      });
+
+      if (!college) {
+        return res.status(404).json({
+          success: false,
+          message: "College not found",
+        });
+      }
+
+      const userRole = (req.user.role || "").toUpperCase();
+      const isSuperAdmin = userRole === "SUPERADMIN";
+
+      if (!isSuperAdmin) {
+        // Get current count of users by role for this college
+        const currentCounts = await prisma.user.groupBy({
+          by: ["role"],
+          where: {
+            collegeId: collegeId,
+            isActive: true,
+          },
+          _count: {
+            id: true,
+          },
+        });
+
+        // Create a map of role counts
+        const roleCountMap = {};
+        currentCounts.forEach((item) => {
+          roleCountMap[item.role.toLowerCase()] = item._count.id;
+        });
+
+        const currentStudents = roleCountMap["student"] || 0;
+        const currentInstructors = roleCountMap["instructor"] || 0;
+        const currentAdmins = roleCountMap["admin"] || 0;
+
+        // Check limits based on the role being registered
+        if (roleLower === "student") {
+          if (
+            college.studentLimit !== null &&
+            currentStudents >= college.studentLimit
+          ) {
+            return res.status(400).json({
+              success: false,
+              message: `Student limit reached (${college.studentLimit}). Current: ${currentStudents}`,
+              limit: college.studentLimit,
+              current: currentStudents,
+            });
+          }
+        } else if (roleLower === "instructor") {
+          if (
+            college.instructorLimit !== null &&
+            currentInstructors >= college.instructorLimit
+          ) {
+            return res.status(400).json({
+              success: false,
+              message: `Instructor limit reached (${college.instructorLimit}). Current: ${currentInstructors}`,
+              limit: college.instructorLimit,
+              current: currentInstructors,
+            });
+          }
+        } else if (roleLower === "admin") {
+          if (
+            college.adminLimit !== null &&
+            currentAdmins >= college.adminLimit
+          ) {
+            return res.status(400).json({
+              success: false,
+              message: `Admin limit reached (${college.adminLimit}). Current: ${currentAdmins}`,
+              limit: college.adminLimit,
+              current: currentAdmins,
+            });
+          }
+        }
+      }
+
       const data = {
         fullName: String(req.body.fullName).trim(),
         email: normalizeEmail(req.body.email),
         role: roleLower,
-        collegeId: req.body.collegeId,
+        collegeId: collegeId,
 
-        // ✅ Only persist these for STUDENT; otherwise store safe empties
         year: roleLower === "student" ? String(req.body.year) : "",
         academicYear:
           roleLower === "student" ? String(req.body.academicYear) : "",
@@ -617,18 +832,8 @@ router.post(
             : null,
 
         mobile: req.body.mobile || null,
-
         status: "PENDING",
       };
-
-      // Validate college
-      const college = await prisma.college.findUnique({
-        where: { id: data.collegeId },
-      });
-      if (!college)
-        return res
-          .status(404)
-          .json({ success: false, message: "College not found" });
 
       // For STUDENT: ensure department belongs to this college
       if (roleLower === "student") {
@@ -645,21 +850,46 @@ router.post(
 
       const created = await prisma.registration.create({ data });
 
-      // Welcome email prompting OTP signup
+      // Welcome email
       try {
         await sendEmail({
           to: data.email,
           subject: "Welcome! Complete your account",
           text: `Hi ${data.fullName}, you've been registered as ${data.role}. To activate your account, request an OTP at ${appBase}/signup.`,
           html: `<p>Hi ${data.fullName},</p>
-                  <p>You’ve been registered as <b>${data.role}</b>.</p>
+                  <p>You've been registered as <b>${data.role}</b>.</p>
                   <p><a href="${appBase}/signup">Click here</a> to request an OTP and complete your account.</p>`,
         });
       } catch (e) {
         console.warn("[registrations] welcome email failed:", e?.message || e);
       }
 
-      res.status(201).json({ success: true, data: { registration: created } });
+      res.status(201).json({
+        success: true,
+        data: {
+          registration: created,
+
+          remainingSlots: !isSuperAdmin
+            ? {
+                students: college.studentLimit
+                  ? college.studentLimit -
+                    (roleCountMap["student"] || 0) -
+                    (roleLower === "student" ? 1 : 0)
+                  : null,
+                instructors: college.instructorLimit
+                  ? college.instructorLimit -
+                    (roleCountMap["instructor"] || 0) -
+                    (roleLower === "instructor" ? 1 : 0)
+                  : null,
+                admins: college.adminLimit
+                  ? college.adminLimit -
+                    (roleCountMap["admin"] || 0) -
+                    (roleLower === "admin" ? 1 : 0)
+                  : null,
+              }
+            : null,
+        },
+      });
     } catch (err) {
       if (err.code === "P2002")
         return res.status(400).json({
@@ -674,7 +904,7 @@ router.post(
 
 router.post(
   "/registrations/bulk",
-  [protect, authorize("SUPERADMIN"), upload.single("file")],
+  [protect, authorize("SUPERADMIN", "ADMIN"), upload.single("file")],
   async (req, res) => {
     try {
       if (!req.file)
