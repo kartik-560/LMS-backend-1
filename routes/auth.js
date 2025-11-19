@@ -72,7 +72,7 @@ const upload = multer({
 const genOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 const hashOtp = async (otp) => bcrypt.hash(otp, 8);
 
-const appBase = process.env.APP_BASE_URL || "http://localhost:3000";
+const appBase = process.env.APP_BASE_URL || "https://lms-1-two.vercel.app";
 
 const loadDepartmentCatalog = async () => {
   const rec = await prisma.setting.findUnique({
