@@ -1240,7 +1240,7 @@ router.get("/:collegeId/permissions", ensureSuperAdmin, async (req, res) => {
   if (!college) return res.status(404).json({ error: "College not found" });
 
   const admins = await prisma.user.findMany({
-    where: { role: "ADMIN", collegeId },
+    where: { role: "admin", collegeId },
     select: { id: true, fullName: true, email: true },
   });
 

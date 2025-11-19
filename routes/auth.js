@@ -1145,6 +1145,7 @@ router.post("/login", async (req, res, next) => {
       isActive: user.isActive,
       permissions: user.permissions || {},
       authProvider: user.authProvider,
+      collegeId: user.collegeId,
     };
 
     res.json({ success: true, data: { user: payload, token } });
