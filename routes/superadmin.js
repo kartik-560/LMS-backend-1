@@ -138,20 +138,20 @@ async function courseDetailHandler(req, res) {
 
     if (role === "STUDENT") {
       const sid = String(req.user.id);
-      
+
       // ✅ CHECK 1: Does the course exist at all?
       const courseExists = await prisma.course.findUnique({
         where: { id },
         select: { id: true, title: true },
       });
-      
-      console.log("Course exists?", courseExists);
-      
+
+   
+
       if (!courseExists) {
-        console.log("❌ Course doesn't exist in database");
+     
         return res.status(404).json({ error: "Course not found" });
       }
-      
+
       // ✅ CHECK 2: Is student enrolled?
       const enrollment = await prisma.enrollment.findFirst({
         where: {
@@ -160,9 +160,9 @@ async function courseDetailHandler(req, res) {
         },
         select: { id: true, status: true },
       });
-      
-      console.log("Enrollment?", enrollment);
-      
+
+    
+
       // ✅ CHECK 3: Is course assigned to college?
       const assignment = await prisma.coursesAssigned.findFirst({
         where: {
@@ -171,22 +171,21 @@ async function courseDetailHandler(req, res) {
         },
         select: { id: true },
       });
-      
-      console.log("Assignment?", assignment);
-      
+
+     
+
       // ✅ Allow access if EITHER enrolled OR assigned
       if (enrollment || assignment) {
         const course = await prisma.course.findUnique({
           where: { id },
           select: baseSelect,
         });
-        console.log("✅ Returning course");
+       
         return res.json(course);
       }
-      
-      console.log("❌ Student has no access - not enrolled and course not assigned to college");
-      return res.status(404).json({ 
-        error: "Course not found or not available" 
+
+      return res.status(404).json({
+        error: "Course not found or not available",
       });
     }
 
@@ -745,10 +744,18 @@ router.get("/courses", protect, async (req, res) => {
       const sid = String(req.user.id);
 
       if (view === "catalog") {
+        // const where = {
+        //   ...commonFilter,
+        //   CoursesAssigned: { some: { collegeId: resolvedCollegeId } },
+        // };
         const where = {
           ...commonFilter,
-          CoursesAssigned: { some: { collegeId: resolvedCollegeId } },
+          OR: [
+            { collegeId: resolvedCollegeId },
+            { CoursesAssigned: { some: { collegeId: resolvedCollegeId } } },
+          ],
         };
+
         const [rows, total] = await Promise.all([
           prisma.course.findMany({
             where,
