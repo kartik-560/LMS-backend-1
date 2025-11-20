@@ -7,15 +7,6 @@ const up = (s) => String(s || "").toUpperCase();
 const isAdmin = (req) => ["ADMIN", "SUPERADMIN"].includes(up(req.user?.role));
 
 router.get("/courses/:courseId/final-test", protect, async (req, res) => {
-  // 🔍 DEBUG: Log incoming request details
-  // console.log("=== FINAL-TEST ROUTE HIT ===");
-  // console.log("Original URL:", req.originalUrl);
-  // console.log("Path:", req.path);
-  // console.log("Params:", req.params);
-  // console.log("Query:", req.query);
-  // console.log("courseId extracted:", req.params.courseId);
-  // console.log("===========================");
-
   try {
     const { courseId } = req.params;
 
@@ -135,6 +126,47 @@ router.post(
   }
 );
 
+// router.get("/chapters/:chapterId/assessments", protect, async (req, res) => {
+//   try {
+//     const { chapterId } = req.params;
+
+//     const chapterExists = await prisma.chapter.findUnique({
+//       where: { id: String(chapterId) },
+//       select: { id: true },
+//     });
+
+//     if (!chapterExists) {
+//       return res.status(404).json({ error: "Chapter not found" });
+//     }
+
+//     const assessments = await prisma.assessment.findMany({
+//       where: {
+//         chapterId: String(chapterId),
+//         scope: "chapter",
+//         ...(isAdmin(req) ? {} : { isPublished: true }),
+//       },
+//       orderBy: {
+//         order: "asc",
+//       },
+//       select: {
+//         id: true,
+//         title: true,
+//         type: true,
+//         scope: true,
+//         order: true,
+//         isPublished: true,
+//         timeLimitSeconds: true,
+//         maxAttempts: true,
+//       },
+//     });
+
+//     return res.status(200).json(assessments);
+//   } catch (e) {
+//     console.error("GET /chapters/:chapterId/assessments error:", e);
+//     return res.status(500).json({ error: "Internal error" });
+//   }
+// });
+
 router.get("/chapters/:chapterId/assessments", protect, async (req, res) => {
   try {
     const { chapterId } = req.params;
@@ -157,15 +189,12 @@ router.get("/chapters/:chapterId/assessments", protect, async (req, res) => {
       orderBy: {
         order: "asc",
       },
-      select: {
-        id: true,
-        title: true,
-        type: true,
-        scope: true,
-        order: true,
-        isPublished: true,
-        timeLimitSeconds: true,
-        maxAttempts: true,
+      include: {
+        // ✅ Add this to fetch related questions
+        questions: {
+          // ✅ This matches your AssessmentQuestion table relation
+          orderBy: [{ order: "asc" }, { id: "asc" }],
+        },
       },
     });
 
@@ -639,7 +668,7 @@ router.get(
       });
 
       if (!certificate) {
-        return res.status(404).json({
+        return res.status(204).json({
           error:
             "Certificate not found. You may need to pass the assessment first.",
         });

@@ -138,22 +138,56 @@ async function courseDetailHandler(req, res) {
 
     if (role === "STUDENT") {
       const sid = String(req.user.id);
-      const course = await prisma.course.findFirst({
-        where: {
-          id,
-          AND: [
-            {
-              enrollments: {
-                some: { studentId: sid /*, status: "APPROVED" */ },
-              },
-            },
-            { CoursesAssigned: { some: { collegeId } } }, // remove if "enrolled trumps assignment"
-          ],
-        },
-        select: baseSelect,
+      
+      // ✅ CHECK 1: Does the course exist at all?
+      const courseExists = await prisma.course.findUnique({
+        where: { id },
+        select: { id: true, title: true },
       });
-      if (!course) return res.status(404).json({ error: "Not found" });
-      return res.json(course);
+      
+      console.log("Course exists?", courseExists);
+      
+      if (!courseExists) {
+        console.log("❌ Course doesn't exist in database");
+        return res.status(404).json({ error: "Course not found" });
+      }
+      
+      // ✅ CHECK 2: Is student enrolled?
+      const enrollment = await prisma.enrollment.findFirst({
+        where: {
+          studentId: sid,
+          courseId: id,
+        },
+        select: { id: true, status: true },
+      });
+      
+      console.log("Enrollment?", enrollment);
+      
+      // ✅ CHECK 3: Is course assigned to college?
+      const assignment = await prisma.coursesAssigned.findFirst({
+        where: {
+          courseId: id,
+          collegeId: collegeId,
+        },
+        select: { id: true },
+      });
+      
+      console.log("Assignment?", assignment);
+      
+      // ✅ Allow access if EITHER enrolled OR assigned
+      if (enrollment || assignment) {
+        const course = await prisma.course.findUnique({
+          where: { id },
+          select: baseSelect,
+        });
+        console.log("✅ Returning course");
+        return res.json(course);
+      }
+      
+      console.log("❌ Student has no access - not enrolled and course not assigned to college");
+      return res.status(404).json({ 
+        error: "Course not found or not available" 
+      });
     }
 
     // ADMIN / INSTRUCTOR
@@ -168,8 +202,6 @@ async function courseDetailHandler(req, res) {
     return res.status(500).json({ error: "Internal server error" });
   }
 }
-
-
 
 router.get("/overview", requireSuperAdmin, async (_req, res) => {
   const [users, totalCourses] = await Promise.all([
@@ -635,8 +667,11 @@ router.get("/courses", protect, async (req, res) => {
     };
 
     // ✅ SUPERADMIN: sees ALL courses
-    if (normalizedRole === "SUPERADMIN" || normalizedRole === "SUPER_ADMIN" || isSuperAdminUser) {
-
+    if (
+      normalizedRole === "SUPERADMIN" ||
+      normalizedRole === "SUPER_ADMIN" ||
+      isSuperAdminUser
+    ) {
       const where = { ...commonFilter };
 
       const [rows, total] = await Promise.all([
@@ -660,11 +695,10 @@ router.get("/courses", protect, async (req, res) => {
 
     // ✅ ADMIN & INSTRUCTOR: see courses with collegeId OR assigned to their college
     if (normalizedRole === "ADMIN" || normalizedRole === "INSTRUCTOR") {
-    
       const userCollegeId = req.user.collegeId;
 
       if (!userCollegeId) {
-        console.log('❌ No collegeId');
+        console.log("❌ No collegeId");
         return res.status(400).json({
           error: "You must be assigned to a college",
         });
@@ -674,12 +708,10 @@ router.get("/courses", protect, async (req, res) => {
       const where = {
         ...commonFilter,
         OR: [
-          { collegeId: userCollegeId },  // Courses with collegeId set
-          { CoursesAssigned: { some: { collegeId: userCollegeId } } }  // Courses assigned via CoursesAssigned
-        ]
+          { collegeId: userCollegeId }, // Courses with collegeId set
+          { CoursesAssigned: { some: { collegeId: userCollegeId } } }, // Courses assigned via CoursesAssigned
+        ],
       };
-
-
 
       const [rows, total] = await Promise.all([
         prisma.course.findMany({
@@ -692,8 +724,6 @@ router.get("/courses", protect, async (req, res) => {
         prisma.course.count({ where }),
       ]);
 
- 
-
       return res.json({
         page: p,
         pageSize: ps,
@@ -704,7 +734,6 @@ router.get("/courses", protect, async (req, res) => {
 
     // ✅ STUDENT: existing logic
     if (normalizedRole === "STUDENT") {
-    
       const resolvedCollegeId = String(collegeId || req.user.collegeId || "");
 
       if (!resolvedCollegeId) {
