@@ -1,7 +1,7 @@
 import express from "express";
 import { body, validationResult } from "express-validator";
 import { prisma } from "../config/prisma.js";
-import { protect } from "../middleware/auth.js";
+import { protect, requireAdminOnly } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -1408,6 +1408,91 @@ router.put(
     });
 
     res.json({ ok: true, permissions: updated.permissions });
+  }
+);
+
+router.get(
+  "/departments/:departmentId/analytics",
+  protect,
+  authorize("ADMIN", "SUPERADMIN"),
+  async (req, res) => {
+    const { departmentId } = req.params;
+
+    if (!departmentId)
+      return res
+        .status(400)
+        .json({ success: false, error: "No departmentId provided." });
+
+    try {
+      const department = await prisma.department.findUnique({
+        where: { id: departmentId },
+        include: {
+          college: true,
+          Registration: true,
+          CoursesAssigned: {
+            include: {
+              course: true, // <-- This pulls in the Course details!
+            },
+          },
+          Enrollment: true,
+          AssessmentAttempt: true,
+          User: true,
+        },
+      });
+
+      // Add these console logs:
+      console.log("Department ID requested:", departmentId);
+      if (!department) {
+        console.log("Department not found for ID:", departmentId);
+      } else {
+        console.log("Department found:", department.name);
+        console.log("Total users fetched from DB:", department?.User?.length);
+        if (department.User && department.User.length) {
+          console.log(
+            "Sample user from DB for this department:",
+            department.User[0]
+          );
+        }
+        // Log all user departmentIds if needed
+        if (department.User && department.User.length) {
+          console.log(
+            "User departmentIds:",
+            department.User.map((u) => u.departmentId)
+          );
+        }
+      }
+
+      if (!department)
+        return res
+          .status(404)
+          .json({ success: false, error: "Department not found" });
+
+      // Split Users by role
+      const instructors = department.User.filter(
+        (u) => (u.role || "").toUpperCase() === "INSTRUCTOR"
+      );
+      const students = department.User.filter(
+        (u) => (u.role || "").toUpperCase() === "STUDENT"
+      );
+      const courses = department.CoursesAssigned || [];
+      const courseCount = courses.length;
+
+      const analytics = {
+        id: department.id,
+        name: department.name,
+        // instructors,
+        instructorCount: instructors.length,
+        // students,
+        studentCount: students.length,
+        courseCount,
+        courses,
+      };
+
+      res.status(200).json({ success: true, data: analytics });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
   }
 );
 

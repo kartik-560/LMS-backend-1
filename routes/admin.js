@@ -28,10 +28,10 @@ router.get("/overview", requireAdmin, async (req, res) => {
       prisma.course.count({
         where: {
           OR: [
-            { collegeId: collegeId },  // Courses created by admin
-            { CoursesAssigned: { some: { collegeId } } }  // Courses assigned to college
-          ]
-        }
+            { collegeId: collegeId }, // Courses created by admin
+            { CoursesAssigned: { some: { collegeId } } }, // Courses assigned to college
+          ],
+        },
       }),
       prisma.user.count({ where: { isActive: true, collegeId } }),
     ]);
@@ -75,9 +75,9 @@ router.get("/overview", requireAdmin, async (req, res) => {
   }
 });
 
-
 router.get("/instructors", requireAdmin, async (req, res) => {
   const collegeId = req.user.collegeId;
+
   const rows = await prisma.user.findMany({
     where: { role: "instructor", collegeId },
     select: {
@@ -92,51 +92,20 @@ router.get("/instructors", requireAdmin, async (req, res) => {
   res.json({ data: rows });
 });
 
-// router.get("/students", requireAdmin, async (req, res) => {
-//   const collegeId = req.user.collegeId;
-//   const rows = await prisma.user.findMany({
-//     where: { role: "student", collegeId },
-//     select: {
-//       id: true,
-//       fullName: true,
-//       email: true,
-//       isActive: true,
-//       lastLogin: true,
-//       enrollments: { select: { courseId: true } },
-//     //   _count: {
-//     //     select: {
-//     //       testResults: true,
-//     //       interviews: true,
-//     //       certifications: true,
-//     //     },
-//     //   },
-//     },
-//     orderBy: { fullName: "asc" },
-//   });
-
-//   const data = rows.map((u) => ({
-//     ...u,
-//     assignedCourses: u.enrollments.map((e) => e.courseId),
-//     // finalTests: u._count.testResults,
-//     // interviews: u._count.interviews,
-//     // certifications: u._count.certifications,
-//   }));
-//   res.json({ data });
-// });
 
 router.get("/students", requireAdmin, async (req, res) => {
   try {
     const collegeId = req.user.collegeId;
-    
+
     // ✅ DEBUG: Check certificate structure
     const sampleCertificate = await prisma.certificate.findFirst();
     // console.log("📜 Certificate structure:", sampleCertificate);
-    
+
     const rows = await prisma.user.findMany({
       where: { role: "student", collegeId },
       include: {
-        enrollments: { 
-          select: { courseId: true } 
+        enrollments: {
+          select: { courseId: true }
         },
         certificates: {
           orderBy: { createdAt: "desc" }, // Try createdAt instead of issuedAt
@@ -167,7 +136,7 @@ router.get("/students", requireAdmin, async (req, res) => {
       // console.log(`\n🔍 Student: ${u.fullName}`);
       // console.log(`   Certificates:`, u.certificates?.length);
       // console.log(`   Assessment Attempts:`, u.assessmentAttempts?.length);
-      
+
       return {
         ...u,
         assignedCourses: u.enrollments.map((e) => e.courseId),
@@ -184,14 +153,13 @@ router.get("/students", requireAdmin, async (req, res) => {
   }
 });
 
-
 router.get("/courses", requireAdmin, async (req, res) => {
   try {
     const collegeId = req.user.collegeId;
-    
+
     if (!collegeId) {
-      return res.status(400).json({ 
-        error: "You must be assigned to a college" 
+      return res.status(400).json({
+        error: "You must be assigned to a college"
       });
     }
 
