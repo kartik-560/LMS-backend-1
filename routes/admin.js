@@ -86,6 +86,12 @@ router.get("/instructors", requireAdmin, async (req, res) => {
       email: true,
       isActive: true,
       lastLogin: true,
+      department: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
     },
     orderBy: { fullName: "asc" },
   });

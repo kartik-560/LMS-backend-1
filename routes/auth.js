@@ -748,7 +748,7 @@ router.post(
 
       const userRole = (req.user.role || "").toUpperCase();
       const isSuperAdmin = userRole === "SUPERADMIN";
-
+      let roleCountMap = {};
       if (!isSuperAdmin) {
         // Get current count of users by role for this college
         const currentCounts = await prisma.user.groupBy({
@@ -763,7 +763,7 @@ router.post(
         });
 
         // Create a map of role counts
-        const roleCountMap = {};
+
         currentCounts.forEach((item) => {
           roleCountMap[item.role.toLowerCase()] = item._count.id;
         });
