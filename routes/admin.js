@@ -16,47 +16,30 @@ function requireAdmin(req, res, next) {
 router.get("/overview", requireAdmin, async (req, res) => {
   try {
     const collegeId = req.user.collegeId;
-    
+
     if (!collegeId) {
       return res.status(400).json({ error: "No collegeId" });
     }
 
-    const [students, instructors, courses, activeUsers] = await Promise.all([
+    const [students, instructors, courses, departments] = await Promise.all([
       prisma.user.count({ where: { role: "student", collegeId } }),
       prisma.user.count({ where: { role: "instructor", collegeId } }),
-      // ✅ UPDATED: Count courses with collegeId OR assigned to college
       prisma.course.count({
         where: {
           OR: [
-            { collegeId: collegeId }, // Courses created by admin
-            { CoursesAssigned: { some: { collegeId } } }, // Courses assigned to college
+            { collegeId: collegeId },
+            { CoursesAssigned: { some: { collegeId } } },
           ],
         },
       }),
-      prisma.user.count({ where: { isActive: true, collegeId } }),
+      prisma.department.count({ where: { collegeId } }),
     ]);
 
-    const [completedChapters, totalChapters] = await Promise.all([
-      prisma.chapterProgress.count({
-        where: { isCompleted: true, student: { collegeId } },
-      }),
-      prisma.chapterProgress.count({
-        where: { student: { collegeId } },
-      }),
-    ]);
-
-    const avgCourseCompletion =
-      totalChapters === 0
-        ? 0
-        : Math.round((completedChapters / totalChapters) * 100);
-
-    // console.log('✅ Admin overview:', {
-    //   students,
-    //   instructors,
-    //   courses,
-    //   activeUsers,
-    //   avgCourseCompletion
-    // });
+    const certificatesGenerated = await prisma.certificate.count({
+      where: {
+        course: { collegeId: collegeId },
+      },
+    });
 
     res.json({
       data: {
@@ -64,8 +47,8 @@ router.get("/overview", requireAdmin, async (req, res) => {
           students: students,
           instructors: instructors,
           courses: courses,
-          users: activeUsers,
-          avgCourseCompletion,
+          departments: departments,
+          certificatesGenerated,
         },
       },
     });
@@ -74,6 +57,35 @@ router.get("/overview", requireAdmin, async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
+// router.get("/instructors", requireAdmin, async (req, res) => {
+//   const collegeId = req.user.collegeId;
+
+//   const rows = await prisma.user.findMany({
+//     where: { role: "instructor", collegeId },
+//     select: {
+//       id: true,
+//       fullName: true,
+//       email: true,
+//       isActive: true,
+//       lastLogin: true,
+//       department: {
+//         select: {
+//           id: true,
+//           name: true,
+//           _count: {
+//             select: {
+//               CoursesAssigned: true,
+//               Course: true,
+//             },
+//           },
+//         },
+//       },
+//     },
+//     orderBy: { fullName: "asc" },
+//   });
+//   res.json({ data: rows });
+// });
 
 router.get("/instructors", requireAdmin, async (req, res) => {
   const collegeId = req.user.collegeId;
@@ -95,33 +107,61 @@ router.get("/instructors", requireAdmin, async (req, res) => {
     },
     orderBy: { fullName: "asc" },
   });
+
+  for (const row of rows) {
+    const deptId = row.department?.id;
+    if (deptId) {
+      const uniqueCourses = await prisma.coursesAssigned.findMany({
+        where: { departmentId: deptId },
+        distinct: ["courseId"],
+        select: { courseId: true },
+      });
+      row.department.totalCourseCount = uniqueCourses.length;
+    }
+  }
+
   res.json({ data: rows });
 });
-
 
 router.get("/students", requireAdmin, async (req, res) => {
   try {
     const collegeId = req.user.collegeId;
 
-    // ✅ DEBUG: Check certificate structure
-    const sampleCertificate = await prisma.certificate.findFirst();
-    // console.log("📜 Certificate structure:", sampleCertificate);
-
     const rows = await prisma.user.findMany({
       where: { role: "student", collegeId },
-      include: {
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        isActive: true,
+        lastLogin: true,
+        role: true,
+        year: true,
+        rollNumber: true,
+        status: true,
+        academicYear: true,
+        departmentId: true,
+        collegeId: true,
+        mobile: true,
+
+        department: {
+          select: { name: true, id: true },
+        },
         enrollments: {
-          select: { courseId: true }
+          select: {
+            courseId: true,
+            course: { select: { title: true, id: true } },
+          },
         },
         certificates: {
-          orderBy: { createdAt: "desc" }, // Try createdAt instead of issuedAt
+          orderBy: { createdAt: "desc" },
           select: {
             id: true,
             certificateId: true,
             courseName: true,
             score: true,
-            createdAt: true, // ✅ Change to createdAt
-            completionDate: true, // Or this if it exists
+            createdAt: true,
+            completionDate: true,
           },
         },
         assessmentAttempts: {
@@ -139,15 +179,14 @@ router.get("/students", requireAdmin, async (req, res) => {
     });
 
     const data = rows.map((u) => {
-      // console.log(`\n🔍 Student: ${u.fullName}`);
-      // console.log(`   Certificates:`, u.certificates?.length);
-      // console.log(`   Assessment Attempts:`, u.assessmentAttempts?.length);
-
       return {
         ...u,
-        assignedCourses: u.enrollments.map((e) => e.courseId),
+        assignedCourses: u.enrollments.map((e) => ({
+          courseId: e.courseId,
+          title: e.course?.title || "Untitled Course",
+        })),
         finalTests: u.assessmentAttempts?.length || 0,
-        interviews: 0, // ✅ Temporarily set to 0
+        interviews: 0,
         certifications: u.certificates?.length || 0,
       };
     });
@@ -159,23 +198,91 @@ router.get("/students", requireAdmin, async (req, res) => {
   }
 });
 
+// router.get("/courses", requireAdmin, async (req, res) => {
+//   try {
+//     const collegeId = req.user.collegeId;
+
+//     if (!collegeId) {
+//       return res.status(400).json({
+//         error: "You must be assigned to a college",
+//       });
+//     }
+
+//     const { search, status, category } = req.query;
+
+//     // Build WHERE clause: courses with collegeId OR assigned to college
+//     const where = {
+//       OR: [
+//         { collegeId: collegeId }, // Courses created by admin with collegeId
+//         { CoursesAssigned: { some: { collegeId } } }, // Courses assigned to college
+//       ],
+//       ...(search ? { title: { contains: search, mode: "insensitive" } } : {}),
+//       ...(status ? { status } : {}),
+//       ...(category ? { category } : {}),
+//     };
+
+//     const rows = await prisma.course.findMany({
+//       where,
+//       select: {
+//         id: true,
+//         title: true,
+//         description: true,
+//         status: true,
+//         thumbnail: true,
+//         category: true,
+//         collegeId: true, // Include this for debugging
+//         createdAt: true,
+//         updatedAt: true,
+//         _count: {
+//           select: {
+//             chapters: true,
+//             enrollments: true,
+//           },
+//         },
+//       },
+//       orderBy: { createdAt: "desc" },
+//     });
+
+//     const data = rows.map((r) => ({
+//       id: r.id,
+//       title: r.title,
+//       description: r.description,
+//       status: r.status,
+//       thumbnail: r.thumbnail,
+//       category: r.category,
+//       totalChapters: r._count.chapters ?? 0,
+//       totalModules: 0, // Add this if your frontend expects it
+//       studentCount: r._count.enrollments ?? 0,
+//       level: r.level || null, // Add if your frontend expects it
+//       createdAt: r.createdAt,
+//       updatedAt: r.updatedAt,
+//     }));
+
+//     console.log("✅ Admin courses found:", data.length);
+
+//     res.json({ data });
+//   } catch (err) {
+//     console.error("GET /admin/courses error:", err);
+//     return res.status(500).json({ error: "Internal server error" });
+//   }
+// });
+
 router.get("/courses", requireAdmin, async (req, res) => {
   try {
     const collegeId = req.user.collegeId;
 
     if (!collegeId) {
       return res.status(400).json({
-        error: "You must be assigned to a college"
+        error: "You must be assigned to a college",
       });
     }
 
     const { search, status, category } = req.query;
 
-    // Build WHERE clause: courses with collegeId OR assigned to college
     const where = {
       OR: [
-        { collegeId: collegeId },  // Courses created by admin with collegeId
-        { CoursesAssigned: { some: { collegeId } } }  // Courses assigned to college
+        { collegeId: collegeId },
+        { CoursesAssigned: { some: { collegeId } } },
       ],
       ...(search ? { title: { contains: search, mode: "insensitive" } } : {}),
       ...(status ? { status } : {}),
@@ -191,7 +298,8 @@ router.get("/courses", requireAdmin, async (req, res) => {
         status: true,
         thumbnail: true,
         category: true,
-        collegeId: true,  // Include this for debugging
+        collegeId: true,
+        madeBySuperAdmin: true,
         createdAt: true,
         updatedAt: true,
         _count: {
@@ -212,14 +320,13 @@ router.get("/courses", requireAdmin, async (req, res) => {
       thumbnail: r.thumbnail,
       category: r.category,
       totalChapters: r._count.chapters ?? 0,
-      totalModules: 0,  // Add this if your frontend expects it
+      totalModules: 0,
       studentCount: r._count.enrollments ?? 0,
-      level: r.level || null,  // Add if your frontend expects it
+      level: r.level || null,
+      madeBySuperAdmin: r.madeBySuperAdmin,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     }));
-
-    console.log('✅ Admin courses found:', data.length);
 
     res.json({ data });
   } catch (err) {

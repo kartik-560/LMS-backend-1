@@ -1,7 +1,12 @@
 import express from "express";
 import { prisma } from "../config/prisma.js";
 
-import { protect, requireCourseCreation, norm } from "../middleware/auth.js";
+import {
+  protect,
+  requireCourseCreation,
+  norm,
+  authorize,
+} from "../middleware/auth.js";
 const router = express.Router();
 
 const up = (s) => String(s || "").toUpperCase();
@@ -145,10 +150,7 @@ async function courseDetailHandler(req, res) {
         select: { id: true, title: true },
       });
 
-   
-
       if (!courseExists) {
-     
         return res.status(404).json({ error: "Course not found" });
       }
 
@@ -161,8 +163,6 @@ async function courseDetailHandler(req, res) {
         select: { id: true, status: true },
       });
 
-    
-
       // ✅ CHECK 3: Is course assigned to college?
       const assignment = await prisma.coursesAssigned.findFirst({
         where: {
@@ -172,15 +172,13 @@ async function courseDetailHandler(req, res) {
         select: { id: true },
       });
 
-     
-
       // ✅ Allow access if EITHER enrolled OR assigned
       if (enrollment || assignment) {
         const course = await prisma.course.findUnique({
           where: { id },
           select: baseSelect,
         });
-       
+
         return res.json(course);
       }
 
@@ -908,15 +906,20 @@ router.post("/courses", requireCourseCreation, async (req, res) => {
   res.json(toCoursePayload(created));
 });
 
-router.patch("/courses/:id", requireSuperAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { title, thumbnail, status, category, description } = req.body || {};
-  const updated = await prisma.course.update({
-    where: { id },
-    data: { title, thumbnail, status, category, description },
-  });
-  res.json(toCoursePayload(updated));
-});
+router.patch(
+  "/courses/:id",
+  protect,
+  authorize("ADMIN", "SUPERADMIN"),
+  async (req, res) => {
+    const { id } = req.params;
+    const { title, thumbnail, status, category, description } = req.body || {};
+    const updated = await prisma.course.update({
+      where: { id },
+      data: { title, thumbnail, status, category, description },
+    });
+    res.json(toCoursePayload(updated));
+  }
+);
 
 router.delete("/courses/:id", requireSuperAdmin, async (req, res) => {
   const { id } = req.params;

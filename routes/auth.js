@@ -133,9 +133,7 @@ router.post("/google-login", async (req, res) => {
       });
     }
 
-    // console.log(`[Google Login] Email: ${email}`);
 
-    // ✅ Check registration status first
     const registration = await prisma.registration.findUnique({
       where: { email },
     });
@@ -168,15 +166,12 @@ router.post("/google-login", async (req, res) => {
       });
     }
 
-    // ✅ Check if verified
     if (!user.isEmailVerified) {
       return res.status(403).json({
         success: false,
         message: "Please complete sign up first.",
       });
     }
-
-    // ✅ Check if user is active
     if (!user.isActive) {
       return res.status(403).json({
         success: false,
@@ -184,15 +179,12 @@ router.post("/google-login", async (req, res) => {
       });
     }
 
-    // ✅ Verify role is set
     if (!user.role) {
       return res.status(500).json({
         success: false,
         message: "User role is not set",
       });
     }
-
-    // console.log(`[Google Login] User logged in: ${user.id}`);
 
     // ✅ Update lastLogin
     await prisma.user.update({
@@ -201,17 +193,6 @@ router.post("/google-login", async (req, res) => {
         lastLogin: new Date(),
       },
     });
-
-    // Generate JWT
-    // const token = jwt.sign(
-    //   {
-    //     id: user.id,
-    //     email: user.email,
-    //     role: user.role,
-    //   },
-    //   process.env.JWT_SECRET,
-    //   { expiresIn: "7d" }
-    // );
 
     const token = signToken(user);
 
@@ -1346,6 +1327,15 @@ router.post("/login", async (req, res, next) => {
         .json({ success: false, message: "Invalid credentials" });
     }
 
+    if (!user.isActive) {
+      return res
+        .status(403) 
+        .json({
+          success: false,
+          message: "Account is inactive. Please contact your Admin.",
+        });
+    }
+
     if (user.authProvider !== "credentials" || !user.password) {
       return res.status(400).json({
         success: false,
@@ -1801,6 +1791,38 @@ router.delete(
             "Cannot delete due to related data. Consider soft delete (isActive=false).",
         });
       next(err);
+    }
+  }
+);
+
+router.patch(
+  "/users/:id/active",
+  protect,
+  authorize("ADMIN", "SUPERADMIN"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { isActive } = req.body;
+
+      // You may want to check role here (only instructors, etc.)
+      const updatedUser = await prisma.user.update({
+        where: { id: String(id) },
+        data: { isActive: !!isActive },
+        select: {
+          id: true,
+          isActive: true,
+          fullName: true,
+          email: true,
+          role: true,
+        },
+      });
+
+      res.json({ success: true, data: updatedUser });
+    } catch (err) {
+      console.error("Error updating user active status", err);
+      res
+        .status(500)
+        .json({ success: false, message: "Unable to update user status" });
     }
   }
 );

@@ -682,4 +682,136 @@ router.get(
   }
 );
 
+// UPDATE assessment
+router.put(
+  "/assessments/:id",
+  protect,
+  authorize("ADMIN", "SUPERADMIN"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const {
+        title,
+        type,
+        timeLimitSeconds,
+        maxAttempts,
+        isPublished,
+        order,
+        questions,
+      } = req.body;
+
+      // Check if assessment exists
+      const existing = await prisma.assessment.findUnique({
+        where: { id: String(id) },
+        select: { id: true, chapterId: true, courseId: true },
+      });
+
+      if (!existing) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+
+      // Update assessment
+      const updated = await prisma.assessment.update({
+        where: { id: String(id) },
+        data: {
+          ...(title !== undefined && { title: String(title) }),
+          ...(type !== undefined && { type }),
+          ...(timeLimitSeconds !== undefined && { timeLimitSeconds }),
+          ...(maxAttempts !== undefined && { maxAttempts }),
+          ...(isPublished !== undefined && { isPublished }),
+          ...(order !== undefined && { order }),
+        },
+      });
+
+      // Update questions if provided
+      if (Array.isArray(questions)) {
+        // Delete old questions
+        await prisma.assessmentQuestion.deleteMany({
+          where: { assessmentId: String(id) },
+        });
+
+        // Create new questions
+        if (questions.length > 0) {
+          const qData = questions.map((q, i) => ({
+            assessmentId: String(id),
+            prompt: String(q.prompt || q.text || ""),
+            type: String(q.type || "single"),
+            options: Array.isArray(q.options)
+              ? q.options.map((opt) => (typeof opt === "string" ? opt : opt.text))
+              : [],
+            correctOptionIndex: Number.isFinite(q.correctOptionIndex)
+              ? q.correctOptionIndex
+              : null,
+            correctOptionIndexes: Array.isArray(q.correctOptionIndexes)
+              ? q.correctOptionIndexes.map(Number)
+              : [],
+            correctText: q.correctText ?? null,
+            pairs: q.pairs ?? null,
+            sampleAnswer: q.sampleAnswer ?? null,
+            points: Number.isFinite(q.points) ? q.points : 1,
+            order: Number.isFinite(q.order) ? q.order : i + 1,
+          }));
+
+          await prisma.assessmentQuestion.createMany({ data: qData });
+        }
+      }
+
+      // Return full assessment with questions
+      const full = await prisma.assessment.findUnique({
+        where: { id: String(id) },
+        include: {
+          questions: { orderBy: [{ order: "asc" }, { id: "asc" }] },
+        },
+      });
+
+      return res.status(200).json(full);
+    } catch (e) {
+      console.error("PUT /assessments/:id error:", e);
+      return res.status(500).json({ error: "Internal error" });
+    }
+  }
+);
+// DELETE assessment
+router.delete(
+  "/assessments/:id",
+  protect,
+  authorize("ADMIN", "SUPERADMIN"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // Check if assessment exists
+      const existing = await prisma.assessment.findUnique({
+        where: { id: String(id) },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+
+      // Delete related questions first (if not using CASCADE)
+      await prisma.assessmentQuestion.deleteMany({
+        where: { assessmentId: String(id) },
+      });
+
+      // Delete assessment attempts (optional, depending on your business logic)
+      // await prisma.assessmentAttempt.deleteMany({
+      //   where: { assessmentId: String(id) },
+      // });
+
+      // Delete the assessment
+      await prisma.assessment.delete({
+        where: { id: String(id) },
+      });
+
+      return res.status(200).json({ message: "Assessment deleted successfully" });
+    } catch (e) {
+      console.error("DELETE /assessments/:id error:", e);
+      return res.status(500).json({ error: "Internal error" });
+    }
+  }
+);
+
+
 export default router;
