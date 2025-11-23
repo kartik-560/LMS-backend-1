@@ -51,8 +51,7 @@ router.get("/courses/:courseId/final-test", protect, async (req, res) => {
   }
 });
 
-router.post(
-  "/chapters/:chapterId/assessments",
+router.post( "/chapters/:chapterId/assessments",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -205,8 +204,7 @@ router.get("/chapters/:chapterId/assessments", protect, async (req, res) => {
   }
 });
 
-router.post(
-  "/courses/:courseId/final-test",
+router.post("/courses/:courseId/final-test",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -228,6 +226,22 @@ router.post(
 
       if (!course) {
         return res.status(404).json({ error: "Course not found" });
+      }
+
+      // Check if a final test already exists for this course
+      const existingFinalTest = await prisma.assessment.findFirst({
+        where: {
+          courseId: course.id,
+          type: "final_test",
+          scope: "course",
+        },
+      });
+
+      if (existingFinalTest) {
+        return res.status(409).json({ 
+          error: "Final test already exists for this course",
+          assessmentId: existingFinalTest.id 
+        });
       }
 
       const assessment = await prisma.assessment.create({
@@ -285,6 +299,7 @@ router.post(
     }
   }
 );
+
 
 router.get("/assessments", protect, async (req, res) => {
   try {
@@ -643,8 +658,7 @@ router.get("/dashboard", protect, async (req, res) => {
   }
 });
 
-router.get(
-  "/assessments/:assessmentId/certificate",
+router.get("/assessments/:assessmentId/certificate",
   protect,
   async (req, res) => {
     try {
@@ -683,8 +697,7 @@ router.get(
 );
 
 // UPDATE assessment
-router.put(
-  "/assessments/:id",
+router.put( "/assessments/:id",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -772,8 +785,7 @@ router.put(
   }
 );
 // DELETE assessment
-router.delete(
-  "/assessments/:id",
+router.delete("/assessments/:id",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -812,6 +824,5 @@ router.delete(
     }
   }
 );
-
 
 export default router;

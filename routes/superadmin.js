@@ -76,22 +76,6 @@ function requireAnyRole(...roles) {
     next();
   };
 }
-async function fetchAllUsersMinimal() {
-  const rows = await prisma.user.findMany({
-    select: {
-      id: true,
-      fullName: true,
-      email: true,
-      role: true,
-      isActive: true,
-      permissions: true,
-      collegeId: true,
-    },
-    orderBy: [{ fullName: "asc" }],
-  });
-
-  return rows;
-}
 
 async function assertAdminBelongsToCollege(user, collegeId) {
   if (!isCollegeAdmin(user)) return false;
@@ -306,10 +290,10 @@ router.get(
         email: u.email,
         role: u.role,
         collegeId: String(u.collegeId || ""),
-        collegeName: u.college?.name || null,
         isActive: u.isActive,
         permissions: u.permissions || {},
         college: u.college,
+         status: u.isActive ? "Active" : "Inactive",
       }));
 
       return res.json(payload);
@@ -319,46 +303,6 @@ router.get(
   }
 );
 
-// router.get(
-//   "/instructors",
-//   requireAnyRole("SUPERADMIN", "ADMIN"),
-//   async (req, res, next) => {
-//     try {
-//       const isSA = isSuperAdmin(req.user);
-//       const cid = effectiveCollegeId(req.user);
-
-//       const where = {
-//         role: "INSTRUCTOR",
-//         ...(isSA ? {} : { collegeId: cid }),
-//       };
-
-//       const instructors = await prisma.user.findMany({
-//         where,
-//         select: {
-//           id: true,
-//           fullName: true,
-//           email: true,
-//           role: true,
-//           collegeId: true,
-//         },
-//       });
-
-//       const payload = instructors.map((u) => ({
-//         id: u.id,
-//         name: u.fullName,
-//         email: u.email,
-//         role: u.role,
-//         collegeId: String(u.collegeId || ""),
-
-//         assignedCourses: [],
-//       }));
-
-//       return res.json(payload);
-//     } catch (err) {
-//       return next(err);
-//     }
-//   }
-// );
 
 router.get(
   "/instructors",
@@ -408,13 +352,13 @@ router.get(
         collegeId: String(u.collegeId || ""),
         collegeName: u.college?.name || null,
         departmentId: String(u.departmentId || ""),
-        departmentName: u.department?.name || null,
         isActive: u.isActive,
         permissions: u.permissions || {},
         avatar: u.avatar,
         college: u.college,
         department: u.department,
         assignedCourses: [],
+        status: u.isActive ? "Active" : "Inactive",
       }));
 
       return res.json(payload);
@@ -423,39 +367,6 @@ router.get(
     }
   }
 );
-
-// router.get("/students",
-//   requireAnyRole("SUPERADMIN", "ADMIN"),
-//   async (req, res) => {
-//     const whereBase = isSuperAdmin(req.user)
-//       ? { role: { equals: "STUDENT", mode: "insensitive" } }
-//       : {
-//           role: { equals: "STUDENT", mode: "insensitive" },
-//           collegeId: req.user.collegeId,
-//         };
-
-//     const rows = await prisma.user.findMany({
-//       where: whereBase,
-//       select: {
-//         id: true,
-//         fullName: true,
-//         email: true,
-//         role: true,
-//         isActive: true,
-//         permissions: true,
-//         enrollments: { select: { courseId: true } },
-//       },
-//       orderBy: { fullName: "asc" },
-//     });
-
-//     const data = rows.map((u) => ({
-//       ...toUserPayload(u),
-//       assignedCourses: u.enrollments?.map((e) => e.courseId) ?? [],
-//     }));
-
-//     res.json({ data });
-//   }
-// );
 
 router.get(
   "/students",
@@ -477,8 +388,20 @@ router.get(
           email: true,
           mobile: true,
           role: true,
+          isActive: true,
           status: true,
           collegeId: true,
+          departmentId: true,
+          college: {
+            select: {
+              name: true,
+            },
+          },
+          department: {
+            select: {
+              name: true,
+            },
+          },
           certificates: {
             orderBy: { createdAt: "desc" },
             select: {
@@ -529,19 +452,15 @@ router.get(
 
         const certifications = u.certificates?.length || 0;
 
-        // console.log(`📊 ${u.fullName}:`, {
-        //   enrolledCoursesCount: u._count?.enrollments || 0,
-        //   finalTests,
-        //   interviews,
-        //   certifications,
-        // });
-
         return {
           ...toUserPayload(u),
           enrolledCoursesCount: u._count?.enrollments || 0,
           finalTests,
           interviews,
           certifications,
+          college: u.college?.name || "N/A",
+          department: u.department?.name || "N/A",
+          status: u.isActive ? "Active" : "Inactive",
         };
       });
 
@@ -690,23 +609,22 @@ router.get("/courses", protect, async (req, res) => {
       });
     }
 
-    // ✅ ADMIN & INSTRUCTOR: see courses with collegeId OR assigned to their college
-    if (normalizedRole === "ADMIN" || normalizedRole === "INSTRUCTOR") {
+    if (normalizedRole === "ADMIN") {
       const userCollegeId = req.user.collegeId;
 
       if (!userCollegeId) {
-        console.log("❌ No collegeId");
+        console.log("❌ Admin has no collegeId");
         return res.status(400).json({
           error: "You must be assigned to a college",
         });
       }
 
-      // Query: Courses where collegeId matches OR assigned to their college
       const where = {
         ...commonFilter,
         OR: [
-          { collegeId: userCollegeId }, // Courses with collegeId set
-          { CoursesAssigned: { some: { collegeId: userCollegeId } } }, // Courses assigned via CoursesAssigned
+          { collegeId: userCollegeId }, // Direct college match
+          { CoursesAssigned: { some: { collegeId: userCollegeId } } }, // Assigned to college
+          { creatorId: req.user.id }, // ✅ Courses created by this admin
         ],
       };
 
@@ -729,7 +647,73 @@ router.get("/courses", protect, async (req, res) => {
       });
     }
 
-    // ✅ STUDENT: existing logic
+    if (normalizedRole === "INSTRUCTOR") {
+      const userCollegeId = req.user.collegeId;
+      const userDepartmentId = req.user.departmentId;
+
+      if (!userCollegeId) {
+        console.log("❌ Instructor has no collegeId");
+        return res.status(400).json({
+          error: "You must be assigned to a college",
+        });
+      }
+
+      // Build department-aware assignment filter
+      const assignmentFilter = {
+        collegeId: userCollegeId,
+      };
+
+      if (userDepartmentId) {
+        // Show courses for their department OR college-wide courses
+        assignmentFilter.OR = [
+          { departmentId: userDepartmentId }, // Their specific department
+          { departmentId: null }, // College-wide courses
+        ];
+      } else {
+        // No department → show only college-wide courses
+        assignmentFilter.departmentId = null;
+      }
+
+      console.log(
+        "[INSTRUCTOR FILTER]",
+        JSON.stringify(assignmentFilter, null, 2)
+      );
+
+      const where = {
+        ...commonFilter,
+        CoursesAssigned: {
+          some: {
+            collegeId: userCollegeId,
+            OR: [{ departmentId: userDepartmentId }, { departmentId: null }],
+          },
+        },
+      };
+
+      const [rows, total] = await Promise.all([
+        prisma.course.findMany({
+          where,
+          select: baseSelect,
+          orderBy: { createdAt: "desc" },
+          skip: (p - 1) * ps,
+          take: ps,
+        }),
+        prisma.course.count({ where }),
+      ]);
+
+      console.log(
+        `[INSTRUCTOR] Found ${rows.length} courses (Dept: ${
+          userDepartmentId || "none"
+        })`
+      );
+
+      return res.json({
+        page: p,
+        pageSize: ps,
+        total,
+        data: rows.map(toCoursePayload),
+      });
+    }
+
     if (normalizedRole === "STUDENT") {
       const resolvedCollegeId = String(collegeId || req.user.collegeId || "");
 
@@ -806,8 +790,6 @@ router.get("/courses", protect, async (req, res) => {
         enrolls,
       });
     }
-
-    // ✅ OTHER ROLES: fallback
 
     const resolvedCollegeId = String(collegeId || req.user.collegeId || "");
 
@@ -947,103 +929,245 @@ router.delete("/courses/:id", requireSuperAdmin, async (req, res) => {
 
 router.get("/courses/:id", courseDetailHandler);
 
+// router.post("/courses/:id/assign", async (req, res) => {
+//   try {
+//     const { id: courseId } = req.params;
+//     const { collegeId, departmentId = null, capacity = null } = req.body || {};
+
+//     if (!collegeId)
+//       return res.status(400).json({ error: "collegeId is required" });
+
+//     // Check if the user is a College Admin or Super Admin
+//     const isCollegeAdminUser = isCollegeAdmin(req.user);
+
+//     if (isCollegeAdminUser) {
+//       // College Admin can only assign courses to their own college’s department, not the college level
+//       const allowed = await assertAdminBelongsToCollege(req.user, collegeId);
+//       if (!allowed)
+//         return res
+//           .status(403)
+//           .json({ error: "Forbidden: You are not an admin of this college" });
+
+//       if (!departmentId) {
+//         return res.status(403).json({
+//           error:
+//             "Forbidden: You can only assign courses to departments within your college",
+//         });
+//       }
+
+//       const departmentAssignment = await prisma.coursesAssigned.findUnique({
+//         where: {
+//           courseId_collegeId_departmentId: {
+//             courseId,
+//             collegeId,
+//             departmentId,
+//           },
+//         },
+//       });
+
+//       if (departmentAssignment) {
+//         return res
+//           .status(409)
+//           .json({ error: "Course already assigned to this department" });
+//       }
+
+//       const row = await prisma.coursesAssigned.upsert({
+//         where: {
+//           courseId_collegeId_departmentId: {
+//             courseId,
+//             collegeId,
+//             departmentId,
+//           },
+//         },
+//         create: { courseId, collegeId, departmentId, capacity },
+//         update: { capacity },
+//       });
+
+//       return res.json({ ok: true, assignment: row });
+//     }
+
+//     if (isSuperAdmin(req.user)) {
+//       // Superadmin can assign the course at both college and department levels
+//       if (!departmentId) {
+//         // Assign to college-level
+//         const row = await prisma.coursesAssigned.upsert({
+//           where: {
+//             courseId_collegeId_departmentId: {
+//               courseId,
+//               collegeId,
+//               departmentId: departmentId ? departmentId : undefined,
+//             },
+//           },
+//           create: { courseId, collegeId, departmentId: null, capacity },
+//           update: { capacity },
+//         });
+
+//         return res.json({ ok: true, assignment: row });
+//       } else {
+//         // Assign to department-level
+//         const row = await prisma.coursesAssigned.upsert({
+//           where: {
+//             courseId_collegeId_departmentId: {
+//               courseId,
+//               collegeId,
+//               departmentId,
+//             },
+//           },
+//           create: { courseId, collegeId, departmentId, capacity },
+//           update: { capacity },
+//         });
+
+//         return res.json({ ok: true, assignment: row });
+//       }
+//     }
+
+//     return res.status(403).json({
+//       error: "Forbidden: User is neither Super Admin nor College Admin",
+//     });
+//   } catch (e) {
+//     console.error(e);
+//     return res.status(500).json({ error: "Internal Server Error" });
+//   }
+// });
+
 router.post("/courses/:id/assign", async (req, res) => {
   try {
     const { id: courseId } = req.params;
-    const { collegeId, departmentId = null, capacity = null } = req.body || {};
+    const {
+      collegeId: rawCollegeId,
+      departmentId: rawDepartmentId,
+      capacity,
+    } = req.body || {};
 
-    if (!collegeId)
+    // --- basic validation ---
+    if (!courseId)
+      return res.status(400).json({ error: "courseId required in params" });
+    if (
+      !rawCollegeId ||
+      typeof rawCollegeId !== "string" ||
+      rawCollegeId.trim() === ""
+    )
       return res.status(400).json({ error: "collegeId is required" });
 
-    // Check if the user is a College Admin or Super Admin
-    const isCollegeAdminUser = isCollegeAdmin(req.user);
+    const collegeId = rawCollegeId.trim();
+    const departmentId =
+      typeof rawDepartmentId === "string" && rawDepartmentId.trim() !== ""
+        ? rawDepartmentId.trim()
+        : null;
 
+    const isCollegeAdminUser = isCollegeAdmin(req.user);
+    const isSuper = isSuperAdmin(req.user);
+
+    // --- college admin: must provide departmentId ---
     if (isCollegeAdminUser) {
-      // College Admin can only assign courses to their own college’s department, not the college level
       const allowed = await assertAdminBelongsToCollege(req.user, collegeId);
       if (!allowed)
         return res
           .status(403)
-          .json({ error: "Forbidden: You are not an admin of this college" });
+          .json({ error: "Forbidden: Not an admin of this college" });
 
       if (!departmentId) {
-        return res.status(403).json({
-          error:
-            "Forbidden: You can only assign courses to departments within your college",
-        });
+        return res
+          .status(403)
+          .json({ error: "Department selection is required for admins." });
       }
 
-      const departmentAssignment = await prisma.coursesAssigned.findUnique({
-        where: {
-          courseId_collegeId_departmentId: {
-            courseId,
-            collegeId,
-            departmentId,
-          },
-        },
+      // use composite unique accessor for department-level
+      const deptKey = { courseId, collegeId, departmentId };
+      const existingDept = await prisma.coursesAssigned.findUnique({
+        where: { courseId_collegeId_departmentId: deptKey },
       });
 
-      if (departmentAssignment) {
+      if (existingDept)
         return res
           .status(409)
           .json({ error: "Course already assigned to this department" });
-      }
 
-      const row = await prisma.coursesAssigned.upsert({
-        where: {
-          courseId_collegeId_departmentId: {
-            courseId,
-            collegeId,
-            departmentId,
-          },
-        },
-        create: { courseId, collegeId, departmentId, capacity },
-        update: { capacity },
+      const created = await prisma.coursesAssigned.create({
+        data: { ...deptKey, capacity },
       });
 
-      return res.json({ ok: true, assignment: row });
+      return res.status(201).json({ ok: true, assignment: created });
     }
 
-    if (isSuperAdmin(req.user)) {
-      // Superadmin can assign the course at both college and department levels
-      if (!departmentId) {
-        // Assign to college-level
-        const row = await prisma.coursesAssigned.upsert({
-          where: {
-            courseId_collegeId_departmentId: {
-              courseId,
-              collegeId,
-              departmentId: null,
-            },
-          },
-          create: { courseId, collegeId, departmentId: null, capacity },
-          update: { capacity },
+    // --- superadmin ---
+    if (isSuper) {
+      if (departmentId) {
+        // department-scoped assign: block if college-level exists
+        const collegeLevel = await prisma.coursesAssigned.findFirst({
+          where: { courseId, collegeId, departmentId: null },
         });
 
-        return res.json({ ok: true, assignment: row });
+        if (collegeLevel) {
+          return res.status(409).json({
+            error:
+              "Conflict: Course is assigned at the college level. Remove college-level assignment first.",
+          });
+        }
+
+        const deptKey = { courseId, collegeId, departmentId };
+        const existingDept = await prisma.coursesAssigned.findUnique({
+          where: { courseId_collegeId_departmentId: deptKey },
+        });
+
+        if (existingDept) {
+          // update capacity (idempotent)
+          const updated = await prisma.coursesAssigned.update({
+            where: { id: existingDept.id },
+            data: { capacity },
+          });
+          return res.status(200).json({ ok: true, assignment: updated });
+        }
+
+        const created = await prisma.coursesAssigned.create({
+          data: { ...deptKey, capacity },
+        });
+        return res.status(201).json({ ok: true, assignment: created });
       } else {
-        // Assign to department-level
-        const row = await prisma.coursesAssigned.upsert({
-          where: {
-            courseId_collegeId_departmentId: {
-              courseId,
-              collegeId,
-              departmentId,
-            },
-          },
-          create: { courseId, collegeId, departmentId, capacity },
-          update: { capacity },
+        // college-level assign: ensure no dept-level rows exist that would conflict
+        const deptConflict = await prisma.coursesAssigned.findFirst({
+          where: { courseId, collegeId, NOT: { departmentId: null } },
         });
 
-        return res.json({ ok: true, assignment: row });
+        if (deptConflict) {
+          return res.status(409).json({
+            error:
+              "Conflict: One or more department-level assignments exist for this course in the college. Remove them before creating a college-level assignment.",
+          });
+        }
+
+        // check if college-level already exists
+        const existingCollege = await prisma.coursesAssigned.findFirst({
+          where: { courseId, collegeId, departmentId: null },
+        });
+
+        if (existingCollege) {
+          const updated = await prisma.coursesAssigned.update({
+            where: { id: existingCollege.id },
+            data: { capacity },
+          });
+          return res.status(200).json({ ok: true, assignment: updated });
+        }
+
+        const created = await prisma.coursesAssigned.create({
+          data: { courseId, collegeId, departmentId: null, capacity },
+        });
+
+        return res.status(201).json({ ok: true, assignment: created });
       }
     }
 
+    // not allowed
     return res.status(403).json({
       error: "Forbidden: User is neither Super Admin nor College Admin",
     });
   } catch (e) {
-    console.error(e);
+    console.error("POST /courses/:id/assign error:", e);
+    if (e?.code === "P2002") {
+      return res
+        .status(409)
+        .json({ error: "Conflict: unique constraint violation" });
+    }
     return res.status(500).json({ error: "Internal Server Error" });
   }
 });

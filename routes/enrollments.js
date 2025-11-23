@@ -37,12 +37,30 @@ function requireAdmin(req, res, next) {
 }
 
 async function findAssignmentForContext(courseId, collegeId, departmentId) {
+  console.log(
+    "[findAssignmentForContext] courseId:",
+    courseId,
+    typeof courseId
+  );
+  console.log("collegeId:", collegeId, typeof collegeId);
+  console.log("departmentId:", departmentId, typeof departmentId);
+
   if (!collegeId) return null;
 
   if (departmentId) {
+    console.log(courseId, collegeId, departmentId, "all data");
     const deptAssign = await prisma.coursesAssigned.findFirst({
-      where: { courseId, collegeId, departmentId },
+      // where: { courseId, collegeId, departmentId },
+      where: {
+        courseId: courseId,
+        collegeId: collegeId,
+        departmentId: departmentId,
+      },
     });
+    console.log(
+      "[findAssignmentForContext] checking college-wide assignment",
+      deptAssign
+    );
     if (deptAssign) return deptAssign;
   }
 
@@ -78,7 +96,6 @@ async function getInstructorAffiliation(userId) {
 
   // 2. If the user isn't found, return null.
   if (!user) {
-
     return null;
   }
 
@@ -90,49 +107,73 @@ async function getInstructorAffiliation(userId) {
   };
 }
 
+// async function isInstructorEligibleForCourse(userId, courseId) {
+//   // 1. Get the instructor's affiliations
+//   const aff = await getInstructorAffiliation(userId);
+//   if (!aff) {
+//     return false;
+//   }
+
+//   const instructorCollegeId = aff.collegeId;
+//   const instructorDeptSet = new Set(aff.departmentIds || []);
+
+//   // 2. Get all assignments for the target course
+//   const courseAssignments = await prisma.coursesAssigned.findMany({
+//     where: { courseId: String(courseId) },
+//     select: { collegeId: true, departmentId: true },
+//   });
+
+//   // LOG THE COURSE'S DATA
+
+//   // 3. Check for a match (logic is unchanged)
+//   for (const assignment of courseAssignments) {
+//     if (
+//       assignment.departmentId &&
+//       instructorDeptSet.has(assignment.departmentId)
+//     ) {
+//       return true;
+//     }
+//     if (
+//       !assignment.departmentId &&
+//       instructorCollegeId &&
+//       assignment.collegeId === instructorCollegeId
+//     ) {
+//       return true;
+//     }
+//   }
+
+//   return false;
+// }
+
 async function isInstructorEligibleForCourse(userId, courseId) {
- 
+  // Get instructor's department and college
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { departmentId: true, collegeId: true },
+  });
+  if (!user) return false;
 
-  // 1. Get the instructor's affiliations
-  const aff = await getInstructorAffiliation(userId);
-  if (!aff) {
-   
-    return false;
-  }
-
-  const instructorCollegeId = aff.collegeId;
-  const instructorDeptSet = new Set(aff.departmentIds || []);
-
-
-  // 2. Get all assignments for the target course
-  const courseAssignments = await prisma.coursesAssigned.findMany({
-    where: { courseId: String(courseId) },
-    select: { collegeId: true, departmentId: true },
+  // Accept:
+  // 1. CoursesAssigned for their department
+  // 2. CoursesAssigned for their college with departmentId: null (college-wide)
+  // 3. Direct course.collegeId match (for legacy/admin-created courses)
+  const assignment = await prisma.coursesAssigned.findFirst({
+    where: {
+      courseId,
+      collegeId: user.collegeId,
+      OR: [{ departmentId: user.departmentId }, { departmentId: null }],
+    },
   });
 
-  // LOG THE COURSE'S DATA
- 
+  if (assignment) return true;
 
-  // 3. Check for a match (logic is unchanged)
-  for (const assignment of courseAssignments) {
-    if (
-      assignment.departmentId &&
-      instructorDeptSet.has(assignment.departmentId)
-    ) {
-     
-    
-      return true;
-    }
-    if (
-      !assignment.departmentId &&
-      instructorCollegeId &&
-      assignment.collegeId === instructorCollegeId
-    ) {
-     
-      return true;
-    }
-  }
+  // Also accept courses with direct collegeId
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+    select: { collegeId: true },
+  });
 
+  if (course && course.collegeId === user.collegeId) return true;
 
   return false;
 }
@@ -187,9 +228,41 @@ async function getStudentOrgContext(userLike) {
   return reg || null;
 }
 
+// async function findAssignmentForCollege(courseId, collegeId) {
+//   if (!courseId || !collegeId) return null;
+//   return prisma.coursesAssigned.findFirst({ where: { courseId, collegeId } });
+// }
+
 async function findAssignmentForCollege(courseId, collegeId) {
   if (!courseId || !collegeId) return null;
-  return prisma.coursesAssigned.findFirst({ where: { courseId, collegeId } });
+
+  // First, check if there's a formal assignment
+  const assignment = await prisma.coursesAssigned.findFirst({
+    where: { courseId, collegeId },
+  });
+
+  if (assignment) {
+    return assignment; // Return formal assignment with capacity info
+  }
+
+  // If no formal assignment, check if course has direct collegeId
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+    select: { id: true, collegeId: true },
+  });
+
+  // If course.collegeId matches student's college, treat it as assigned
+  if (course && course.collegeId === collegeId) {
+    // Return a virtual assignment object (no capacity limits)
+    return {
+      courseId: course.id,
+      collegeId: course.collegeId,
+      departmentId: null,
+      capacity: null, // No capacity limit for direct assignments
+    };
+  }
+
+  return null; // Course not assigned to this college
 }
 
 async function ensureCanModerateCourse(user, courseId) {
@@ -364,19 +437,39 @@ router.post("/enrollments", requireAdmin, async (req, res) => {
   }
 });
 
+// router.get("/enrollments/self", requireAuth, async (req, res) => {
+//   try {
+//     const rows = await prisma.enrollment.findMany({
+//       where: { studentId: String(req.user.id) },
+//       select: {
+//         id: true,
+//         courseId: true,
+//         studentId: true,
+//         status: true,
+//         progress: true,
+//         departmentId: true,
+//         createdAt: true,
+//         updatedAt: true,
+//       },
+//       orderBy: { createdAt: "desc" },
+//     });
+//     res.json(rows);
+//   } catch (e) {
+//     console.error("GET /enrollments/self error:", e);
+//     res.status(500).json({ error: "Internal error" });
+//   }
+// });
+
 router.get("/enrollments/self", requireAuth, async (req, res) => {
   try {
+    const activeStatuses = ["APPROVED", "ENROLLED", "ACTIVE"];
     const rows = await prisma.enrollment.findMany({
-      where: { studentId: String(req.user.id) },
-      select: {
-        id: true,
-        courseId: true,
-        studentId: true,
-        status: true,
-        progress: true,
-        departmentId: true,
-        createdAt: true,
-        updatedAt: true,
+      where: {
+        studentId: String(req.user.id),
+        status: { in: activeStatuses },
+      },
+      include: {
+        course: true, // <-- Includes every course field
       },
       orderBy: { createdAt: "desc" },
     });
@@ -435,7 +528,6 @@ router.post(
 
       req.body.courseId = courseId;
       const fakeNext = { ...req, url: "/enrollments", method: "POST" };
-      // @ts-ignore express internals
       return router.handle(fakeNext, res);
     } catch (e) {
       console.error("POST /courses/:courseId/enrollments error:", e);
@@ -462,6 +554,11 @@ router.post(
   requireAuth,
   async (req, res) => {
     try {
+      // Log incoming request payload
+      console.log("Request Body:", req.body);
+      console.log("Request Params:", req.params);
+      console.log("Request User:", req.user);
+
       const courseId = coerceId(req.params.courseId);
       const studentId = String(req.user.id);
 
@@ -494,6 +591,23 @@ router.post(
           .json({ error: "Course not assigned to your college" });
       }
 
+      // Get departmentId from CoursesAssigned table
+      const courseAssignment = await prisma.coursesAssigned.findFirst({
+        where: {
+          courseId: courseId,
+          collegeId: org.collegeId,
+        },
+        select: {
+          departmentId: true,
+        },
+      });
+
+      if (!courseAssignment) {
+        return res
+          .status(409)
+          .json({ error: "Course is not assigned to any department " });
+      }
+
       const allowed = statusCfg.allowed;
       const pendingStatus = allowed.includes("PENDING")
         ? "PENDING"
@@ -501,14 +615,26 @@ router.post(
           allowed[0] ||
           "PENDING";
 
+      // Log the data being created
+      console.log("Creating enrollment with data:", {
+        courseId,
+        studentId,
+        status: pendingStatus,
+        departmentId: courseAssignment.departmentId,
+      });
+
       const created = await prisma.enrollment.create({
         data: {
           courseId,
           studentId,
           status: pendingStatus,
-          departmentId: org.departmentId ?? null,
+          departmentId: courseAssignment.departmentId,
         },
       });
+
+      // Log successful creation
+      console.log("Enrollment created:", created);
+
       res.status(201).json(created);
     } catch (e) {
       console.error("POST /courses/:courseId/enrollment-requests error:", e);
@@ -516,6 +642,7 @@ router.post(
     }
   }
 );
+
 
 router.get("/enrollment-requests/me", requireAuth, async (req, res) => {
   try {
@@ -539,6 +666,76 @@ router.get("/enrollment-requests/me", requireAuth, async (req, res) => {
   }
 });
 
+// router.get("/instructor/enrollment-requests", requireAuth, async (req, res) => {
+//   try {
+//     if (!isInstructor(req.user.role)) {
+//       return res
+//         .status(403)
+//         .json({ error: "Forbidden: only instructors can view requests" });
+//     }
+
+//     const email = String(req.user.email || "");
+
+//     // Pull org; be robust to email casing & missing registration
+//     const reg = await prisma.registration.findFirst({
+//       where: { email: { equals: email, mode: "insensitive" } },
+//       orderBy: { updatedAt: "desc" },
+//       select: { collegeId: true, departmentId: true },
+//     });
+
+//     const collegeId = reg?.collegeId ?? req.user.collegeId ?? null;
+//     const departmentId = reg?.departmentId ?? req.user.departmentId ?? null;
+
+//     if (!collegeId && !departmentId) {
+//       return res.json([]); // no org context => no visibility
+//     }
+
+//     const PENDING = [
+//       "PENDING",
+//       "REQUESTED",
+//       "PENDING_INSTRUCTOR",
+//       "PENDING_APPROVAL",
+//     ];
+
+//     // Key idea: filter by related assignments on the course
+//     const rows = await prisma.enrollment.findMany({
+//       where: {
+//         status: { in: PENDING },
+//         course: {
+//           CoursesAssigned: {
+//             some: {
+//               OR: [
+//                 ...(departmentId ? [{ departmentId }] : []),
+//                 ...(collegeId ? [{ collegeId, departmentId: null }] : []),
+//               ],
+//             },
+//           },
+//         },
+//       },
+//       include: {
+//         student: { select: { id: true, fullName: true, email: true } },
+//         course: { select: { id: true, title: true } },
+//       },
+//       orderBy: { createdAt: "desc" },
+//     });
+
+//     const payload = rows.map((e) => ({
+//       id: e.id,
+//       courseId: e.courseId,
+//       courseTitle: e.course?.title || null,
+//       studentId: e.studentId,
+//       studentName: e.student?.fullName || null,
+//       studentEmail: e.student?.email || null,
+//       status: e.status,
+//       createdAt: e.createdAt,
+//     }));
+//     return res.json(payload);
+//   } catch (e) {
+//     console.error("GET /instructor/enrollment-requests error:", e);
+//     return res.status(500).json({ error: "Internal error" });
+//   }
+// });
+
 router.get("/instructor/enrollment-requests", requireAuth, async (req, res) => {
   try {
     if (!isInstructor(req.user.role)) {
@@ -548,19 +745,18 @@ router.get("/instructor/enrollment-requests", requireAuth, async (req, res) => {
     }
 
     const email = String(req.user.email || "");
-
-    // Pull org; be robust to email casing & missing registration
     const reg = await prisma.registration.findFirst({
       where: { email: { equals: email, mode: "insensitive" } },
       orderBy: { updatedAt: "desc" },
       select: { collegeId: true, departmentId: true },
     });
 
-    const collegeId = reg?.collegeId ?? req.user.collegeId ?? null;
-    const departmentId = reg?.departmentId ?? req.user.departmentId ?? null;
+    const instructorCollegeId = reg?.collegeId ?? req.user.collegeId ?? null;
+    const instructorDepartmentId =
+      reg?.departmentId ?? req.user.departmentId ?? null;
 
-    if (!collegeId && !departmentId) {
-      return res.json([]); // no org context => no visibility
+    if (!instructorCollegeId) {
+      return res.json([]);
     }
 
     const PENDING = [
@@ -570,29 +766,95 @@ router.get("/instructor/enrollment-requests", requireAuth, async (req, res) => {
       "PENDING_APPROVAL",
     ];
 
-    // Key idea: filter by related assignments on the course
-    const rows = await prisma.enrollment.findMany({
+    // ✅ Get instructor's eligible courses first
+    const assignmentFilter = {
+      collegeId: instructorCollegeId,
+    };
+
+    if (instructorDepartmentId) {
+      assignmentFilter.OR = [
+        { departmentId: instructorDepartmentId }, // Their department
+        { departmentId: null }, // College-wide
+      ];
+    } else {
+      assignmentFilter.departmentId = null;
+    }
+
+    const assignments = await prisma.coursesAssigned.findMany({
+      where: assignmentFilter,
+      select: { courseId: true },
+    });
+
+    const eligibleCourseIds = [...new Set(assignments.map((a) => a.courseId))];
+
+    // ✅ Also check direct Course.collegeId (for admin-created courses)
+    const directCollegeCourses = await prisma.course.findMany({
+      where: {
+        collegeId: instructorCollegeId,
+        id: { notIn: eligibleCourseIds }, // Avoid duplicates
+      },
+      select: { id: true },
+    });
+
+    eligibleCourseIds.push(...directCollegeCourses.map((c) => c.id));
+
+    if (eligibleCourseIds.length === 0) {
+      return res.json([]);
+    }
+
+    console.log("[INSTRUCTOR] Eligible course IDs:", eligibleCourseIds);
+
+    // ✅ Get pending enrollments for eligible courses
+    const allPendingEnrollments = await prisma.enrollment.findMany({
       where: {
         status: { in: PENDING },
-        course: {
-          CoursesAssigned: {
-            some: {
-              OR: [
-                ...(departmentId ? [{ departmentId }] : []),
-                ...(collegeId ? [{ collegeId, departmentId: null }] : []),
-              ],
-            },
-          },
-        },
+        courseId: { in: eligibleCourseIds },
       },
       include: {
-        student: { select: { id: true, fullName: true, email: true } },
+        student: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            collegeId: true,
+            departmentId: true,
+          },
+        },
         course: { select: { id: true, title: true } },
       },
       orderBy: { createdAt: "desc" },
     });
 
-    const payload = rows.map((e) => ({
+    console.log(
+      "[INSTRUCTOR] Found pending enrollments:",
+      allPendingEnrollments.length
+    );
+
+    // ✅ Filter by student's college matching instructor's college
+    const filteredRows = [];
+
+    for (const enrollment of allPendingEnrollments) {
+      let studentCollegeId = enrollment.student?.collegeId || null;
+
+      // Fallback to registration
+      if (!studentCollegeId && enrollment.student?.email) {
+        const studentReg = await prisma.registration.findFirst({
+          where: { email: enrollment.student.email },
+          orderBy: { updatedAt: "desc" },
+          select: { collegeId: true },
+        });
+        studentCollegeId = studentReg?.collegeId || null;
+      }
+
+      // Only show if student is from same college
+      if (studentCollegeId === instructorCollegeId) {
+        filteredRows.push(enrollment);
+      }
+    }
+
+    console.log("[INSTRUCTOR] Filtered enrollments:", filteredRows.length);
+
+    const payload = filteredRows.map((e) => ({
       id: e.id,
       courseId: e.courseId,
       courseTitle: e.course?.title || null,
@@ -602,6 +864,7 @@ router.get("/instructor/enrollment-requests", requireAuth, async (req, res) => {
       status: e.status,
       createdAt: e.createdAt,
     }));
+
     return res.json(payload);
   } catch (e) {
     console.error("GET /instructor/enrollment-requests error:", e);
@@ -609,11 +872,189 @@ router.get("/instructor/enrollment-requests", requireAuth, async (req, res) => {
   }
 });
 
+// router.patch(
+//   "/enrollment-requests/:id",
+//   requireEligibleInstructorForEnrollment,
+//   async (req, res) => {
+//     try {
+//       const { id } = req.params;
+//       const { nextStatus } = req.body || {};
+
+//       if (!isUuid(id)) return res.status(400).json({ error: "Invalid id" });
+//       if (!nextStatus)
+//         return res.status(400).json({ error: "nextStatus required" });
+
+//       const next = normStatus(nextStatus);
+
+//       const statusCfg = await loadEnrollmentStatusConfig(); // { allowed:[], approved_like:[] ... }
+//       if (!statusCfg.allowed.map(normStatus).includes(next)) {
+//         return res.status(400).json({ error: "Invalid status" });
+//       }
+
+//       console.log("Entering PATCH /enrollment-requests/:id approval endpoint");
+//       // before assignment check
+//       console.log("About to check assignment for:", {
+//         courseId,
+//         collegeId,
+//         departmentId,
+//       });
+//       // after assignment check
+//       console.log("Assignment result:", assignment);
+//       // Fetch enrollment with course + student; we also need departmentId on enrollment
+//       const enr = await prisma.enrollment.findUnique({
+//         where: { id },
+//         include: {
+//           course: { select: { id: true } },
+//           student: { select: { id: true, email: true } },
+//         },
+//       });
+//       if (!enr) return res.status(404).json({ error: "Not found" });
+
+//       const isApprovedLike = statusCfg.approved_like
+//         .map(normStatus)
+//         .includes(next);
+//       if (isApprovedLike) {
+//         const studentOrg = await getStudentOrgContext(enr.student);
+//         const collegeId = studentOrg?.collegeId || null;
+
+//         const deptId = enr.departmentId || studentOrg?.departmentId || null;
+
+//         // Find the most specific assignment for this course/org context
+//         const assignment = await findAssignmentForContext(
+//           enr.courseId,
+//           collegeId,
+//           deptId
+//         );
+//         if (!assignment) {
+//           return res.status(409).json({
+//             error: "Course not assigned for student's college/department",
+//           });
+//         }
+
+//         if (assignment.capacity != null) {
+//           let used = 0;
+
+//           if (assignment.departmentId) {
+//             // Department-scoped capacity
+//             used = await countApprovedLikeAtDepartment(
+//               enr.courseId,
+//               assignment.departmentId,
+//               statusCfg.approved_like.map(normStatus)
+//             );
+//           } else {
+//             // College-scoped capacity (your existing helper)
+//             used = await countApprovedLikeAtCollege(
+//               enr.courseId,
+//               assignment.collegeId,
+//               statusCfg.approved_like.map(normStatus)
+//             );
+//           }
+
+//           if (used >= assignment.capacity) {
+//             return res.status(409).json({
+//               error: `Capacity full (${used}/${
+//                 assignment.capacity
+//               }) for this course${
+//                 assignment.departmentId
+//                   ? " in the department"
+//                   : " at the college"
+//               }`,
+//             });
+//           }
+//         }
+//       }
+
+//       const updated = await prisma.enrollment.update({
+//         where: { id },
+//         data: {
+//           status: next,
+//           startedAt: enr.startedAt ?? new Date(),
+//         },
+//         select: {
+//           id: true,
+//           studentId: true,
+//           courseId: true,
+//           departmentId: true,
+//           status: true,
+//           startedAt: true,
+//           updatedAt: true,
+//         },
+//       });
+
+//       res.json(updated);
+//     } catch (e) {
+//       console.error("PATCH /enrollment-requests/:id error:", e);
+//       res.status(500).json({ error: "Internal error" });
+//     }
+//   }
+// );
+
+// router.get("/courses/:courseId/enrollment-requests",
+//   requireAuth,
+//   async (req, res) => {
+//     try {
+//       if (!isInstructor(req.user.role)) {
+//         return res
+//           .status(403)
+//           .json({ error: "Forbidden: only instructors can view requests" });
+//       }
+//       const courseId = String(req.params.courseId);
+
+//       const ok = await isInstructorEligibleForCourse(req.user.id, courseId);
+//       if (!ok) {
+//         return res.status(403).json({
+//           error: "Forbidden: not eligible instructor for this course",
+//         });
+//       }
+
+//       const PENDING = [
+//         "PENDING",
+//         "REQUESTED",
+//         "PENDING_INSTRUCTOR",
+//         "PENDING_APPROVAL",
+//       ];
+
+//       const rows = await prisma.enrollment.findMany({
+//         where: { courseId, status: { in: PENDING } },
+//         include: {
+//           student: { select: { id: true, fullName: true, email: true } },
+//           course: { select: { id: true, title: true } },
+//         },
+//         orderBy: { createdAt: "desc" },
+//       });
+
+//       res.json(
+//         rows.map((e) => ({
+//           id: e.id,
+//           courseId: e.courseId,
+//           courseTitle: e.course?.title || null,
+//           studentId: e.studentId,
+//           studentName: e.student?.fullName || null,
+//           studentEmail: e.student?.email || null,
+//           status: e.status,
+//           createdAt: e.createdAt,
+//         }))
+//       );
+//     } catch (e) {
+//       console.error("GET /courses/:courseId/enrollment-requests error:", e);
+//       res.status(500).json({ error: "Internal error" });
+//     }
+//   }
+// );
+
 router.patch(
   "/enrollment-requests/:id",
   requireEligibleInstructorForEnrollment,
   async (req, res) => {
     try {
+      // 🔥 Log everything coming into this request
+      console.log("---- PATCH /enrollment-requests/:id Incoming Request ----");
+      console.log("REQ PARAMS:", req.params);
+      console.log("REQ BODY:", req.body);
+      console.log("REQ QUERY:", req.query);
+      console.log("REQ HEADERS:", req.headers);
+      console.log("----------------------------------------------------------");
+
       const { id } = req.params;
       const { nextStatus } = req.body || {};
 
@@ -623,12 +1064,13 @@ router.patch(
 
       const next = normStatus(nextStatus);
 
-      const statusCfg = await loadEnrollmentStatusConfig(); // { allowed:[], approved_like:[] ... }
+      const statusCfg = await loadEnrollmentStatusConfig();
       if (!statusCfg.allowed.map(normStatus).includes(next)) {
         return res.status(400).json({ error: "Invalid status" });
       }
 
-      // Fetch enrollment with course + student; we also need departmentId on enrollment
+      console.log("Entering PATCH /enrollment-requests/:id approval endpoint");
+
       const enr = await prisma.enrollment.findUnique({
         where: { id },
         include: {
@@ -636,57 +1078,67 @@ router.patch(
           student: { select: { id: true, email: true } },
         },
       });
-      if (!enr) return res.status(404).json({ error: "Not found" });
+      if (!enr) return res.status(404).json({ error: "Enrollment not found" });
 
+      const studentOrg = await getStudentOrgContext(enr.student);
+      const collegeId = studentOrg?.collegeId
+        ? String(studentOrg.collegeId).trim()
+        : null;
+      const departmentId = enr.departmentId
+        ? String(enr.departmentId).trim()
+        : studentOrg?.departmentId
+        ? String(studentOrg.departmentId).trim()
+        : null;
+
+      console.log("About to check assignment for:", {
+        courseId: String(enr.courseId).trim(),
+        collegeId,
+        departmentId,
+        types: {
+          courseId: typeof enr.courseId,
+          collegeId: typeof collegeId,
+          departmentId: typeof departmentId,
+        },
+      });
+
+      let assignment = null;
       const isApprovedLike = statusCfg.approved_like
         .map(normStatus)
         .includes(next);
+
       if (isApprovedLike) {
-        const studentOrg = await getStudentOrgContext(enr.student);
-        const collegeId = studentOrg?.collegeId || null;
-
-        const deptId = enr.departmentId || studentOrg?.departmentId || null;
-
-        // Find the most specific assignment for this course/org context
-        const assignment = await findAssignmentForContext(
-          enr.courseId,
+        assignment = await findAssignmentForContext(
+          String(enr.courseId).trim(),
           collegeId,
-          deptId
+          departmentId
         );
+        console.log("Assignment result:", assignment);
+
         if (!assignment) {
-          return res.status(409).json({
+          return res.status(899).json({
             error: "Course not assigned for student's college/department",
           });
         }
 
         if (assignment.capacity != null) {
           let used = 0;
-
           if (assignment.departmentId) {
-            // Department-scoped capacity
             used = await countApprovedLikeAtDepartment(
-              enr.courseId,
-              assignment.departmentId,
+              String(enr.courseId).trim(),
+              String(assignment.departmentId).trim(),
               statusCfg.approved_like.map(normStatus)
             );
           } else {
-            // College-scoped capacity (your existing helper)
             used = await countApprovedLikeAtCollege(
-              enr.courseId,
-              assignment.collegeId,
+              String(enr.courseId).trim(),
+              String(assignment.collegeId).trim(),
               statusCfg.approved_like.map(normStatus)
             );
           }
 
           if (used >= assignment.capacity) {
             return res.status(409).json({
-              error: `Capacity full (${used}/${
-                assignment.capacity
-              }) for this course${
-                assignment.departmentId
-                  ? " in the department"
-                  : " at the college"
-              }`,
+              error: `Capacity full (${used}/${assignment.capacity})`,
             });
           }
         }
@@ -709,6 +1161,7 @@ router.patch(
         },
       });
 
+      console.log("first log", updated);
       res.json(updated);
     } catch (e) {
       console.error("PATCH /enrollment-requests/:id error:", e);
@@ -717,7 +1170,8 @@ router.patch(
   }
 );
 
-router.get("/courses/:courseId/enrollment-requests",
+router.get(
+  "/courses/:courseId/enrollment-requests",
   requireAuth,
   async (req, res) => {
     try {
@@ -726,13 +1180,21 @@ router.get("/courses/:courseId/enrollment-requests",
           .status(403)
           .json({ error: "Forbidden: only instructors can view requests" });
       }
-      const courseId = String(req.params.courseId);
 
+      const courseId = String(req.params.courseId);
       const ok = await isInstructorEligibleForCourse(req.user.id, courseId);
       if (!ok) {
         return res.status(403).json({
           error: "Forbidden: not eligible instructor for this course",
         });
+      }
+
+      const instructorAff = await getInstructorAffiliation(req.user.id);
+      const instructorCollegeId = instructorAff?.collegeId || null;
+      const instructorDepartmentIds = instructorAff?.departmentIds || [];
+
+      if (!instructorCollegeId) {
+        return res.json([]);
       }
 
       const PENDING = [
@@ -742,17 +1204,53 @@ router.get("/courses/:courseId/enrollment-requests",
         "PENDING_APPROVAL",
       ];
 
-      const rows = await prisma.enrollment.findMany({
+      const allRows = await prisma.enrollment.findMany({
         where: { courseId, status: { in: PENDING } },
         include: {
-          student: { select: { id: true, fullName: true, email: true } },
+          student: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              collegeId: true,
+              departmentId: true,
+            },
+          },
           course: { select: { id: true, title: true } },
         },
         orderBy: { createdAt: "desc" },
       });
 
+      const filteredRows = [];
+
+      for (const enrollment of allRows) {
+        let studentCollegeId = enrollment.student?.collegeId || null;
+        let studentDepartmentId = enrollment.student?.departmentId || null;
+
+        if (!studentCollegeId && enrollment.student?.email) {
+          const studentReg = await prisma.registration.findFirst({
+            where: { email: enrollment.student.email },
+            orderBy: { updatedAt: "desc" },
+            select: { collegeId: true, departmentId: true },
+          });
+          studentCollegeId = studentReg?.collegeId || null;
+          studentDepartmentId =
+            studentDepartmentId || studentReg?.departmentId || null;
+        }
+
+        const collegeMatches = studentCollegeId === instructorCollegeId;
+        const departmentMatches =
+          instructorDepartmentIds.length > 0
+            ? instructorDepartmentIds.includes(studentDepartmentId)
+            : true;
+
+        if (collegeMatches && departmentMatches) {
+          filteredRows.push(enrollment);
+        }
+      }
+
       res.json(
-        rows.map((e) => ({
+        filteredRows.map((e) => ({
           id: e.id,
           courseId: e.courseId,
           courseTitle: e.course?.title || null,

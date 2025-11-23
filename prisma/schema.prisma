@@ -30,18 +30,18 @@ model User {
   fullName                 String    @db.VarChar(100)
   year                     String?   @db.VarChar(10)
 
-  mobile                   String?   @db.VarChar(20)
-  rollNumber               String?   @db.VarChar(50)
-  academicYear             String?   @db.VarChar(20)
-  createdCourses           Course[]  @relation("CourseCreator")
-  departmentId String?
+  mobile             String?             @db.VarChar(20)
+  rollNumber         String?             @db.VarChar(50)
+  academicYear       String?             @db.VarChar(20)
+  createdCourses     Course[]            @relation("CourseCreator")
+  departmentId       String?
   enrollments        Enrollment[]
   assessmentAttempts AssessmentAttempt[]
   chapterProgress    ChapterProgress[]
   courseReviews      CourseReview[]
-  certificates    Certificate[]
+  certificates       Certificate[]
   collegeId          String?
-  department Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  department         Department?         @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   college            College?            @relation(fields: [collegeId], references: [id])
   permissions        Json?
 
@@ -50,11 +50,11 @@ model User {
 }
 
 model Registration {
-  id       String @id @default(uuid())
-  fullName String @db.VarChar(150)
-  email    String @unique @db.VarChar(150)
-  mobile       String? @db.VarChar(15)
-  year         String? @db.VarChar(20)
+  id       String  @id @default(uuid())
+  fullName String  @db.VarChar(150)
+  email    String  @unique @db.VarChar(150)
+  mobile   String? @db.VarChar(15)
+  year     String? @db.VarChar(20)
 
   academicYear String? @db.VarChar(20)
   rollNumber   String? @db.VarChar(50)
@@ -72,8 +72,9 @@ model Registration {
 
   college    College     @relation(fields: [collegeId], references: [id], onDelete: Cascade)
   department Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  @@index([mobile])
+
   @@unique([collegeId, rollNumber])
+  @@index([mobile])
   @@index([collegeId])
   @@index([departmentId])
   @@index([role])
@@ -81,21 +82,21 @@ model Registration {
 }
 
 model College {
-  id            String       @id @default(uuid())
-  contactPerson String       @db.VarChar(150)
-  name          String       @db.VarChar(200)
-  mobileNumber  String       @db.VarChar(20)
-  studentLimit  Int          @default(1)
-  validity      DateTime
-  email         String       @db.VarChar(150)
-  status        Int          @default(1)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  permissions   Json?
-  departments   Department[]
-
-  adminLimit      Int @default(1)
-  instructorLimit Int @default(1)
+  id              String       @id @default(uuid())
+  contactPerson   String       @db.VarChar(150)
+  name            String       @db.VarChar(200)
+  mobileNumber    String       @db.VarChar(20)
+  studentLimit    Int          @default(1)
+  validity        DateTime
+  email           String       @db.VarChar(150)
+  status          Int          @default(1)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  permissions     Json?
+  departments     Department[]
+  departmentLimit Int          @default(1)
+  adminLimit      Int          @default(1)
+  instructorLimit Int          @default(1)
 
   courses Course[]
 
@@ -121,11 +122,11 @@ model Department {
   CoursesAssigned   CoursesAssigned[]
   Enrollment        Enrollment[]
   AssessmentAttempt AssessmentAttempt[]
+  User              User[]
 
   @@index([name])
   @@index([collegeId])
   @@map("departments")
-  User User[]
 }
 
 model Course {
@@ -149,7 +150,7 @@ model Course {
   reviews           CourseReview[]
   CoursesAssigned   CoursesAssigned[]
   AssessmentAttempt AssessmentAttempt[]
-  certificates    Certificate[]
+  certificates      Certificate[]
 
   @@index([creatorId])
   @@index([status])
@@ -254,7 +255,7 @@ model Assessment {
   updatedAt        DateTime             @updatedAt
   questions        AssessmentQuestion[]
   attempts         AssessmentAttempt[]
-  certificates    Certificate[]
+  certificates     Certificate[]
   chapter          Chapter?             @relation(fields: [chapterId], references: [id], onDelete: Cascade)
   course           Course?              @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
@@ -266,23 +267,22 @@ model Assessment {
 }
 
 model Certificate {
-  id              String   @id @default(cuid())
-  userId          String
-  assessmentId    String
-  courseId        String
-  courseName      String
-  studentName     String
-  score           Float
-  completionDate  DateTime
-  certificateId   String   @unique
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
+  id             String   @id @default(cuid())
+  userId         String
+  assessmentId   String
+  courseId       String
+  courseName     String
+  studentName    String
+  score          Float
+  completionDate DateTime
+  certificateId  String   @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
   // Relations
-  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assessment      Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  course          Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  course     Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
   @@unique([assessmentId, userId])
   @@index([userId])

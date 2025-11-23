@@ -457,8 +457,7 @@ router.get("/colleges/:collegeId/departments", async (req, res) => {
   }
 });
 
-router.post(
-  "/admin/departments-catalog/add",
+router.post( "/admin/departments-catalog/add",
   [protect, authorize("SUPERADMIN")],
   async (req, res) => {
     try {
@@ -1795,8 +1794,7 @@ router.delete(
   }
 );
 
-router.patch(
-  "/users/:id/active",
+router.patch("/users/:id/active",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -1804,7 +1802,6 @@ router.patch(
       const { id } = req.params;
       const { isActive } = req.body;
 
-      // You may want to check role here (only instructors, etc.)
       const updatedUser = await prisma.user.update({
         where: { id: String(id) },
         data: { isActive: !!isActive },

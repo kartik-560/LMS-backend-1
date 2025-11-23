@@ -179,6 +179,10 @@ router.get(
             },
           });
 
+          const adminCount = users.filter(
+            (user) => user.role === "admin"
+          ).length;
+
           const instrCount = users.filter(
             (user) => user.role === "instructor"
           ).length;
@@ -240,7 +244,6 @@ router.get(
             }
           }
 
-          // Combine and de-duplicate courses from both sources
           const coursesByCollege = new Map(
             collegeIds.map((id) => [id, new Map()])
           );
@@ -290,6 +293,7 @@ router.get(
             email: c.email,
             contactPerson: c.contactPerson,
             mobileNumber: c.mobileNumber,
+            adminCount: adminCount || 0,
             instructorCount: instrCount || 0,
             studentCount: studAssignedCount || 0,
             enrolledStudents: enrolledStudentsSet.size,
@@ -576,6 +580,11 @@ router.get(
               email: true,
               mobile: true,
               role: true,
+              department: {
+                select: {
+                  name: true,
+                },
+              },
             },
             orderBy: { fullName: "asc" },
           },
@@ -729,6 +738,7 @@ router.get(
         email: u.email,
         mobile: u.mobile,
         role: u.role,
+        department: u.department?.name || "N/A",
       });
 
       const mapStudentWithCount = (u) => ({
@@ -1311,9 +1321,11 @@ router.get("/:collegeId/permissions", ensureSuperAdmin, async (req, res) => {
       studentLimit: true,
       adminLimit: true,
       instructorLimit: true,
+      departmentLimit: true, // <-- Added here
       permissions: true,
     },
   });
+
   if (!college) return res.status(404).json({ error: "College not found" });
 
   const admins = await prisma.user.findMany({
@@ -1346,6 +1358,7 @@ router.get("/:collegeId/permissions", ensureSuperAdmin, async (req, res) => {
       studentLimit: college.studentLimit,
       adminLimit: college.adminLimit,
       instructorLimit: college.instructorLimit,
+      departmentLimit: college.departmentLimit, // <-- Added here
     },
     adminPermissions,
   });
@@ -1360,6 +1373,7 @@ router.put(
       studentLimit = 0,
       adminLimit = 0,
       instructorLimit = 0,
+      departmentLimit = 0,
     } = req.body || {};
 
     const updated = await prisma.college.update({
@@ -1368,8 +1382,14 @@ router.put(
         studentLimit: Number(studentLimit),
         adminLimit: Number(adminLimit),
         instructorLimit: Number(instructorLimit),
+        departmentLimit: Number(departmentLimit),
       },
-      select: { studentLimit: true, adminLimit: true, instructorLimit: true },
+      select: {
+        studentLimit: true,
+        adminLimit: true,
+        instructorLimit: true,
+        departmentLimit: true,
+      },
     });
 
     res.json({ limits: updated });

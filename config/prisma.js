@@ -8,7 +8,7 @@ const globalForPrisma = globalThis;
 const prismaInstance =
   globalForPrisma.__prisma__ ||
   new PrismaClient({
-    log: isDev ? ['query', 'info', 'warn', 'error'] : ['error'],
+    log: isDev ? ['info', 'warn', 'error'] : ['error'],
     errorFormat: 'colorless',
   });
 
