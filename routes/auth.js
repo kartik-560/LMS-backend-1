@@ -133,7 +133,6 @@ router.post("/google-login", async (req, res) => {
       });
     }
 
-
     const registration = await prisma.registration.findUnique({
       where: { email },
     });
@@ -166,6 +165,18 @@ router.post("/google-login", async (req, res) => {
       });
     }
 
+    if (user.collegeId) {
+      const college = await prisma.college.findUnique({
+        where: { id: user.collegeId },
+      });
+      if (!college || college.status !== 1) {
+        return res.status(403).json({
+          success: false,
+          message: "College is inactive. Please contact your Admin.",
+        });
+      }
+    }
+
     if (!user.isEmailVerified) {
       return res.status(403).json({
         success: false,
@@ -187,14 +198,21 @@ router.post("/google-login", async (req, res) => {
     }
 
     // ✅ Update lastLogin
+    const nextTokenVersion = (user.tokenVersion ?? 0) + 1;
     await prisma.user.update({
-      where: { email },
+      where: { id: user.id },
       data: {
         lastLogin: new Date(),
+        tokenVersion: nextTokenVersion,
       },
     });
 
-    const token = signToken(user);
+     const tokenPayload = {
+      id: user.id,
+      role: user.role,
+      tokenVersion: nextTokenVersion,
+    };
+    const token = signToken(tokenPayload);
 
     return res.status(200).json({
       success: true,
@@ -206,6 +224,7 @@ router.post("/google-login", async (req, res) => {
           role: user.role,
           collegeId: user.collegeId,
           departmentId: user.departmentId,
+          tokenVersion: nextTokenVersion,
         },
         token,
       },
@@ -457,7 +476,8 @@ router.get("/colleges/:collegeId/departments", async (req, res) => {
   }
 });
 
-router.post( "/admin/departments-catalog/add",
+router.post(
+  "/admin/departments-catalog/add",
   [protect, authorize("SUPERADMIN")],
   async (req, res) => {
     try {
@@ -539,122 +559,6 @@ router.get("/signup/departments-catalog", async (_req, res) => {
   const items = await loadDepartmentCatalog();
   return res.json({ success: true, data: { items } });
 });
-
-// router.post(
-//   "/registrations",
-//   [
-//     protect,
-//     authorize("SUPERADMIN", "ADMIN"),
-//     body("fullName").exists().trim().isLength({ min: 2, max: 150 }),
-//     body("email").exists().isEmail(),
-//     body("role").exists().isString(),
-//     body("year").optional().isString(),
-//     body("academicYear").optional().isString(),
-//     body("rollNumber").optional().isString(),
-//     body("mobile")
-//       .optional({ checkFalsy: true })
-//       .isMobilePhone("en-IN")
-//       .withMessage("Please provide a valid 10-digit Indian mobile number"),
-
-//     body("collegeId").exists().isString(),
-//     body("departmentId").optional().isString(),
-
-//     body("role").custom((value, { req }) => {
-//       const roleLower = String(value || "").toLowerCase();
-//       if (!["student", "instructor", "admin"].includes(roleLower)) {
-//         throw new Error("role must be STUDENT | INSTRUCTOR | ADMIN");
-//       }
-//       if (roleLower === "student") {
-//         if (!req.body.departmentId)
-//           throw new Error("departmentId is required for STUDENT");
-//         if (!req.body.year) throw new Error("year is required for STUDENT");
-//         if (!req.body.academicYear)
-//           throw new Error("academicYear is required for STUDENT");
-//       }
-//       return true;
-//     }),
-
-//     handleValidationErrors,
-//   ],
-//   async (req, res, next) => {
-//     try {
-//       const roleLower = String(req.body.role).trim().toLowerCase();
-
-//       const data = {
-//         fullName: String(req.body.fullName).trim(),
-//         email: normalizeEmail(req.body.email),
-//         role: roleLower,
-//         collegeId: req.body.collegeId,
-
-//         // ✅ Only persist these for STUDENT; otherwise store safe empties
-//         year: roleLower === "student" ? String(req.body.year) : "",
-//         academicYear:
-//           roleLower === "student" ? String(req.body.academicYear) : "",
-//         rollNumber:
-//           roleLower === "student" && req.body.rollNumber
-//             ? String(req.body.rollNumber)
-//             : null,
-
-//         departmentId:
-//           roleLower === "student" || roleLower === "instructor"
-//             ? String(req.body.departmentId)
-//             : null,
-
-//         mobile: req.body.mobile || null,
-
-//         status: "PENDING",
-//       };
-
-//       // Validate college
-//       const college = await prisma.college.findUnique({
-//         where: { id: data.collegeId },
-//       });
-//       if (!college)
-//         return res
-//           .status(404)
-//           .json({ success: false, message: "College not found" });
-
-//       // For STUDENT: ensure department belongs to this college
-//       if (roleLower === "student") {
-//         const dept = await prisma.department.findUnique({
-//           where: { id: String(req.body.departmentId) },
-//         });
-//         if (!dept || dept.collegeId !== data.collegeId) {
-//           return res.status(400).json({
-//             success: false,
-//             message: "departmentId must belong to the selected college",
-//           });
-//         }
-//       }
-
-//       const created = await prisma.registration.create({ data });
-
-//       // Welcome email prompting OTP signup
-//       try {
-//         await sendEmail({
-//           to: data.email,
-//           subject: "Welcome! Complete your account",
-//           text: `Hi ${data.fullName}, you've been registered as ${data.role}. To activate your account, request an OTP at ${appBase}/signup.`,
-//           html: `<p>Hi ${data.fullName},</p>
-//                   <p>You’ve been registered as <b>${data.role}</b>.</p>
-//                   <p><a href="${appBase}/signup">Click here</a> to request an OTP and complete your account.</p>`,
-//         });
-//       } catch (e) {
-//         console.warn("[registrations] welcome email failed:", e?.message || e);
-//       }
-
-//       res.status(201).json({ success: true, data: { registration: created } });
-//     } catch (err) {
-//       if (err.code === "P2002")
-//         return res.status(400).json({
-//           success: false,
-//           message:
-//             "Registration exists for this email or (college, rollNumber)",
-//         });
-//       next(err);
-//     }
-//   }
-// );
 
 router.post(
   "/registrations",
@@ -1326,13 +1230,23 @@ router.post("/login", async (req, res, next) => {
         .json({ success: false, message: "Invalid credentials" });
     }
 
-    if (!user.isActive) {
-      return res
-        .status(403) 
-        .json({
+    if (user.collegeId) {
+      const college = await prisma.college.findUnique({
+        where: { id: user.collegeId },
+      });
+      if (!college || college.status !== 1) {
+        return res.status(403).json({
           success: false,
-          message: "Account is inactive. Please contact your Admin.",
+          message: "College is inactive. Please contact your Admin.",
         });
+      }
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Account is inactive. Please contact your Admin.",
+      });
     }
 
     if (user.authProvider !== "credentials" || !user.password) {
@@ -1349,12 +1263,16 @@ router.post("/login", async (req, res, next) => {
         .json({ success: false, message: "Invalid credentials" });
     }
 
+    const nextVersion = user.tokenVersion + 1;
     await prisma.user.update({
       where: { id: user.id },
-      data: { lastLogin: new Date() },
+      data: { lastLogin: new Date(), tokenVersion: nextVersion },
     });
 
-    const token = signToken(user);
+    const token = signToken({
+      id: user.id,
+      tokenVersion: nextVersion,
+    });
 
     const payload = {
       id: user.id,
@@ -1365,11 +1283,12 @@ router.post("/login", async (req, res, next) => {
       permissions: user.permissions || {},
       authProvider: user.authProvider,
       collegeId: user.collegeId,
+      tokenVersion: nextVersion,
     };
 
     res.json({ success: true, data: { user: payload, token } });
   } catch (err) {
-    next(err); // Pass error to the error handler
+    next(err);
   }
 });
 
@@ -1794,7 +1713,8 @@ router.delete(
   }
 );
 
-router.patch("/users/:id/active",
+router.patch(
+  "/users/:id/active",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {

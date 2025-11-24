@@ -7,11 +7,20 @@ import { sendEmail } from "../utils/sendEmail.js";
 
 /* ----------------------------- helpers ----------------------------- */
 
-const generateToken = (userId, role, collegeId = null) => {
-  return jwt.sign({ userId, role, collegeId }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRE || "7d",
-  });
+// const generateToken = (userId, role, collegeId = null) => {
+//   return jwt.sign({ userId, role, collegeId }, process.env.JWT_SECRET, {
+//     expiresIn: process.env.JWT_EXPIRE || "7d",
+//   });
+// };
+const generateToken = (userId, role, collegeId = null, tokenVersion = 0) => {
+  return jwt.sign(
+    { userId, role, collegeId, tokenVersion },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRE || "7d" }
+  );
 };
+
+
 
 const hashPassword = async (password) => {
   const rounds = parseInt(process.env.BCRYPT_ROUNDS) || 12;

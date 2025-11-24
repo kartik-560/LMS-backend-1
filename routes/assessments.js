@@ -51,7 +51,7 @@ router.get("/courses/:courseId/final-test", protect, async (req, res) => {
   }
 });
 
-router.post( "/chapters/:chapterId/assessments",
+router.post("/chapters/:chapterId/assessments",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -238,9 +238,9 @@ router.post("/courses/:courseId/final-test",
       });
 
       if (existingFinalTest) {
-        return res.status(409).json({ 
+        return res.status(409).json({
           error: "Final test already exists for this course",
-          assessmentId: existingFinalTest.id 
+          assessmentId: existingFinalTest.id,
         });
       }
 
@@ -300,6 +300,160 @@ router.post("/courses/:courseId/final-test",
   }
 );
 
+router.get("/courses/:courseId/final-test/:assessmentId",
+  protect,
+  authorize("ADMIN", "SUPERADMIN"),
+  async (req, res) => {
+    try {
+      const { courseId, assessmentId } = req.params;
+
+      // Verify course exists
+      const course = await prisma.course.findUnique({
+        where: { id: String(courseId) },
+        select: { id: true },
+      });
+
+      if (!course) {
+        return res.status(404).json({ error: "Course not found" });
+      }
+
+      const assessment = await prisma.assessment.findFirst({
+        where: {
+          id: String(assessmentId),
+          courseId: course.id,
+          type: "final_test",
+          scope: "course",
+        },
+        include: {
+          questions: {
+            orderBy: [{ order: "asc" }, { id: "asc" }],
+          },
+        },
+      });
+
+      if (!assessment) {
+        return res.status(404).json({
+          error: "Final test not found for this course",
+        });
+      }
+
+      return res.status(200).json(assessment);
+    } catch (e) {
+      console.error(
+        "GET /courses/:courseId/final-test/:assessmentId error:",
+        e
+      );
+      return res.status(500).json({ error: "Internal error" });
+    }
+  }
+);
+
+router.put("/courses/:courseId/final-test/:assessmentId",
+  protect,
+  authorize("ADMIN", "SUPERADMIN"),
+  async (req, res) => {
+    try {
+      const { courseId, assessmentId } = req.params;
+      const {
+        title,
+        timeLimitSeconds = null,
+        maxAttempts = 1,
+        isPublished = true,
+        questions = [],
+      } = req.body;
+
+      // Verify course exists
+      const course = await prisma.course.findUnique({
+        where: { id: String(courseId) },
+        select: { id: true },
+      });
+
+      if (!course) {
+        return res.status(404).json({ error: "Course not found" });
+      }
+
+      // Verify assessment exists and belongs to this course
+      const existingAssessment = await prisma.assessment.findFirst({
+        where: {
+          id: String(assessmentId),
+          courseId: course.id,
+          type: "final_test",
+          scope: "course",
+        },
+      });
+
+      if (!existingAssessment) {
+        return res.status(404).json({
+          error: "Final test not found for this course",
+        });
+      }
+
+      // Use transaction to update assessment and replace questions
+      const updatedAssessment = await prisma.$transaction(async (tx) => {
+        // Update the assessment
+        const updated = await tx.assessment.update({
+          where: { id: existingAssessment.id },
+          data: {
+            title: String(title || "Final Test"),
+            timeLimitSeconds,
+            maxAttempts,
+            isPublished,
+          },
+        });
+
+        // Delete all existing questions for this assessment
+        await tx.assessmentQuestion.deleteMany({
+          where: { assessmentId: existingAssessment.id },
+        });
+
+        // Create new questions if provided
+        if (Array.isArray(questions) && questions.length) {
+          const qData = questions.map((q, i) => ({
+            assessmentId: existingAssessment.id,
+            prompt: String(q.prompt || q.text || ""),
+            type: String(q.type || "single"),
+            options: Array.isArray(q.options)
+              ? q.options.map((opt) =>
+                  typeof opt === "string" ? opt : opt.text
+                )
+              : [],
+            correctOptionIndex: Number.isFinite(q.correctOptionIndex)
+              ? q.correctOptionIndex
+              : null,
+            correctOptionIndexes: Array.isArray(q.correctOptionIndexes)
+              ? q.correctOptionIndexes.map(Number)
+              : [],
+            correctText: q.correctText ?? null,
+            pairs: q.pairs ?? null,
+            sampleAnswer: q.sampleAnswer ?? null,
+            points: Number.isFinite(q.points) ? q.points : 1,
+            order: Number.isFinite(q.order) ? q.order : i + 1,
+          }));
+
+          await tx.assessmentQuestion.createMany({ data: qData });
+        }
+
+        // Fetch and return the updated assessment with questions
+        return await tx.assessment.findUnique({
+          where: { id: existingAssessment.id },
+          include: {
+            questions: {
+              orderBy: [{ order: "asc" }, { id: "asc" }],
+            },
+          },
+        });
+      });
+
+      return res.status(200).json(updatedAssessment);
+    } catch (e) {
+      console.error(
+        "PUT /courses/:courseId/final-test/:assessmentId error:",
+        e
+      );
+      return res.status(500).json({ error: "Internal error" });
+    }
+  }
+);
 
 router.get("/assessments", protect, async (req, res) => {
   try {
@@ -697,7 +851,7 @@ router.get("/assessments/:assessmentId/certificate",
 );
 
 // UPDATE assessment
-router.put( "/assessments/:id",
+router.put("/assessments/:id",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -750,7 +904,9 @@ router.put( "/assessments/:id",
             prompt: String(q.prompt || q.text || ""),
             type: String(q.type || "single"),
             options: Array.isArray(q.options)
-              ? q.options.map((opt) => (typeof opt === "string" ? opt : opt.text))
+              ? q.options.map((opt) =>
+                  typeof opt === "string" ? opt : opt.text
+                )
               : [],
             correctOptionIndex: Number.isFinite(q.correctOptionIndex)
               ? q.correctOptionIndex
@@ -817,7 +973,9 @@ router.delete("/assessments/:id",
         where: { id: String(id) },
       });
 
-      return res.status(200).json({ message: "Assessment deleted successfully" });
+      return res
+        .status(200)
+        .json({ message: "Assessment deleted successfully" });
     } catch (e) {
       console.error("DELETE /assessments/:id error:", e);
       return res.status(500).json({ error: "Internal error" });
