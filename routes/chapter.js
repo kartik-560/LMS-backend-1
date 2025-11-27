@@ -53,15 +53,16 @@ router.get("/chapters/:id/view", requireAuthOptional, async (req, res) => {
 
     const user = req.user; // may be undefined if not logged in
     const role = user?.role || null;
-    const isStaff = role === "ADMIN" || role === "INSTRUCTOR";
+    const isStaff =
+      role === "SUPERADMIN" || role === "ADMIN" || role === "INSTRUCTOR";
 
     // ✅ FIX: use studentId (not userId) in Enrollment
     let isEnrolled = false;
     if (user?.id) {
       const enroll = await prisma.enrollment.findFirst({
         where: {
-          studentId: user.id, // <-- change here
-          courseId: chapter.courseId, // <-- available on chapter
+          studentId: user.id,
+          courseId: chapter.courseId,
         },
         select: { id: true },
       });
@@ -84,6 +85,7 @@ router.get("/chapters/:id/view", requireAuthOptional, async (req, res) => {
       order: chapter.order,
       content: chapter.content ?? chapter.description ?? "",
       attachments: chapter.attachments ?? [],
+      assessments: chapter.assessments ?? [],
       settings: chapter.settings ?? null,
       hasQuiz: (chapter.assessments?.length ?? 0) > 0,
     });
@@ -130,7 +132,6 @@ router.get("/courses/:courseId/chapters", async (req, res) => {
   try {
     const { courseId } = req.params;
 
-
     const rows = await prisma.chapter.findMany({
       where: { courseId },
       orderBy: { order: "asc" },
@@ -147,9 +148,6 @@ router.get("/courses/:courseId/chapters", async (req, res) => {
         assessments: { select: { id: true } },
       },
     });
-
-   
-   
 
     // Return data wrapped in an object for consistency
     return res.json({ data: rows });
