@@ -7,6 +7,7 @@ import xlsx from "xlsx";
 import { protect } from "../middleware/auth.js";
 import { prisma } from "../config/prisma.js";
 import {
+  sendEmail,
   sendAccountCreatedEmail,
   sendSuperAdminRegistrationEmail,
 } from "../utils/sendEmail.js";
