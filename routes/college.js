@@ -980,36 +980,20 @@ router.get(
           Registration: true,
           CoursesAssigned: {
             include: {
-              course: true, // <-- This pulls in the Course details!
+              course: true,
             },
           },
           Enrollment: true,
           AssessmentAttempt: true,
-          User: true,
+          User: {
+            select: {
+              id: true,
+              fullName: true,
+              role: true,
+            },
+          },
         },
       });
-
-      // Add these console logs:
-      console.log("Department ID requested:", departmentId);
-      if (!department) {
-        console.log("Department not found for ID:", departmentId);
-      } else {
-        console.log("Department found:", department.name);
-        console.log("Total users fetched from DB:", department?.User?.length);
-        if (department.User && department.User.length) {
-          console.log(
-            "Sample user from DB for this department:",
-            department.User[0]
-          );
-        }
-        // Log all user departmentIds if needed
-        if (department.User && department.User.length) {
-          console.log(
-            "User departmentIds:",
-            department.User.map((u) => u.departmentId)
-          );
-        }
-      }
 
       if (!department)
         return res
@@ -1029,7 +1013,7 @@ router.get(
       const analytics = {
         id: department.id,
         name: department.name,
-        // instructors,
+        instructors,
         instructorCount: instructors.length,
         // students,
         studentCount: students.length,
