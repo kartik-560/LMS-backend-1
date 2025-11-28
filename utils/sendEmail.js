@@ -32,7 +32,7 @@ export async function sendAccountCreatedEmail({
   role,
   mobile,
   loginUrl = process.env.APP_BASE_URL
-    ? `${process.env.APP_BASE_URL}/login`
+    ? `${process.env.APP_BASE_URL}/signup`
     : "http://localhost:3000/login",
 }) {
   const subject = "Welcome to Learning Management System";
