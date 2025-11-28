@@ -6,7 +6,10 @@ import multer from "multer";
 import xlsx from "xlsx";
 import { protect } from "../middleware/auth.js";
 import { prisma } from "../config/prisma.js";
-import { sendEmail } from "../utils/sendEmail.js";
+import {
+  sendAccountCreatedEmail,
+  sendSuperAdminRegistrationEmail,
+} from "../utils/sendEmail.js";
 import { OAuth2Client } from "google-auth-library";
 const router = express.Router();
 
@@ -207,7 +210,7 @@ router.post("/google-login", async (req, res) => {
       },
     });
 
-     const tokenPayload = {
+    const tokenPayload = {
       id: user.id,
       role: user.role,
       tokenVersion: nextTokenVersion,
@@ -736,13 +739,11 @@ router.post(
 
       // Welcome email
       try {
-        await sendEmail({
+        await sendAccountCreatedEmail({
           to: data.email,
-          subject: "Welcome! Complete your account",
-          text: `Hi ${data.fullName}, you've been registered as ${data.role}. To activate your account, request an OTP at ${appBase}/signup.`,
-          html: `<p>Hi ${data.fullName},</p>
-                  <p>You've been registered as <b>${data.role}</b>.</p>
-                  <p><a href="${appBase}/signup">Click here</a> to request an OTP and complete your account.</p>`,
+          fullName: data.fullName,
+          role: data.role,
+          mobile: data.mobile,
         });
       } catch (e) {
         console.warn("[registrations] welcome email failed:", e?.message || e);
@@ -1109,6 +1110,7 @@ router.post(
         .trim()
         .toLowerCase();
       const password = req.body.password;
+      const mobile = req.body.mobile;
 
       if (roleLower !== "superadmin") {
         return res.status(400).json({
@@ -1180,8 +1182,8 @@ router.post(
           isActive: true,
           isEmailVerified: true,
           year: req.body.year || null,
-          department: req.body.department || null,
-          mobile: req.body.mobile || null,
+          departmentId: req.body.departmentId || null,
+          mobile: mobile || null,
           permissions: req.body.permissions ?? {},
         },
         select: {
@@ -1195,9 +1197,25 @@ router.post(
         },
       });
 
+      // ADDED: Send registration email with user credentials
+      try {
+        await sendSuperAdminRegistrationEmail({
+          email: email,
+          fullName: fullName,
+          role: roleLower,
+          password: password, 
+          mobile: mobile,
+        });
+        console.log("✅ Registration email sent successfully to:", email);
+      } catch (emailError) {
+        console.error("⚠️ Failed to send registration email:", emailError);
+        
+      }
+
       res.status(201).json({
         success: true,
-        message: "User created. They must log in to receive a token.",
+        message:
+          "SuperAdmin created successfully. Registration email has been sent.",
         data: { user: created },
       });
     } catch (err) {
