@@ -51,7 +51,8 @@ router.get("/courses/:courseId/final-test", protect, async (req, res) => {
   }
 });
 
-router.post("/chapters/:chapterId/assessments",
+router.post(
+  "/chapters/:chapterId/assessments",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -204,7 +205,8 @@ router.get("/chapters/:chapterId/assessments", protect, async (req, res) => {
   }
 });
 
-router.post("/courses/:courseId/final-test",
+router.post(
+  "/courses/:courseId/final-test",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -300,7 +302,8 @@ router.post("/courses/:courseId/final-test",
   }
 );
 
-router.get("/courses/:courseId/final-test/:assessmentId",
+router.get(
+  "/courses/:courseId/final-test/:assessmentId",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -348,7 +351,8 @@ router.get("/courses/:courseId/final-test/:assessmentId",
   }
 );
 
-router.put("/courses/:courseId/final-test/:assessmentId",
+router.put(
+  "/courses/:courseId/final-test/:assessmentId",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -573,6 +577,189 @@ router.get("/assessments/:id", protect, async (req, res) => {
   }
 });
 
+// router.post("/assessments/:id/attempts", protect, async (req, res) => {
+//   try {
+//     const assessmentId = String(req.params.id);
+//     const userId = req.user?.id;
+
+//     if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+//     const assessment = await prisma.assessment.findUnique({
+//       where: { id: assessmentId },
+//       include: {
+//         questions: true,
+//         course: { select: { id: true, title: true } },
+//       },
+//     });
+
+//     if (!assessment) return res.status(404).json({ error: "Not found" });
+//     if (!assessment.isPublished && !isAdmin(req)) {
+//       return res.status(403).json({ error: "Forbidden" });
+//     }
+
+//     const attemptCount = await prisma.assessmentAttempt.count({
+//       where: {
+//         assessmentId,
+//         studentId: userId,
+//         status: "submitted",
+//       },
+//     });
+
+//     const maxAttempts = assessment.maxAttempts || 1;
+//     if (attemptCount >= maxAttempts) {
+//       return res.status(400).json({
+//         error: `Maximum attempts (${maxAttempts}) reached.`,
+//       });
+//     }
+
+//     const answers = req.body?.answers || {};
+//     let score = 0;
+//     let totalPoints = 0;
+
+//     // Your existing grading logic...
+//     for (const q of assessment.questions) {
+//       const pts = typeof q.points === "number" ? q.points : 1;
+//       totalPoints += pts;
+//       const ans = answers[q.id];
+
+//       if (typeof q.correctOptionIndex === "number") {
+//         if (Number(ans) === q.correctOptionIndex) score += pts;
+//         continue;
+//       }
+
+//       if (
+//         Array.isArray(q.correctOptionIndexes) &&
+//         q.correctOptionIndexes.length
+//       ) {
+//         const normalized = Array.isArray(ans) ? ans.map(Number).sort() : [];
+//         const correct = [...q.correctOptionIndexes].sort();
+//         if (
+//           normalized.length === correct.length &&
+//           normalized.every((v, i) => v === correct[i])
+//         ) {
+//           score += pts;
+//         }
+//         continue;
+//       }
+
+//       if (q.correctText) {
+//         const userAns = String(ans || "")
+//           .trim()
+//           .toLowerCase();
+//         const correctAns = String(q.correctText).trim().toLowerCase();
+//         if (userAns === correctAns) score += pts;
+//         continue;
+//       }
+
+//       if (q.pairs) {
+//         try {
+//           const pairs =
+//             typeof q.pairs === "string" ? JSON.parse(q.pairs) : q.pairs;
+//           const userPairs = ans || {};
+//           let correctCount = 0;
+//           pairs.forEach((pair, idx) => {
+//             if (
+//               userPairs[idx] &&
+//               userPairs[idx].toLowerCase().trim() ===
+//                 pair.right.toLowerCase().trim()
+//             ) {
+//               correctCount++;
+//             }
+//           });
+//           if (correctCount === pairs.length) score += pts;
+//         } catch (e) {
+//           console.error("Error grading match question:", e);
+//         }
+//       }
+//     }
+
+//     const percentage =
+//       totalPoints > 0 ? Math.round((score / totalPoints) * 100) : 0;
+//     const submittedAt = new Date();
+
+//     const attempt = await prisma.assessmentAttempt.create({
+//       data: {
+//         assessmentId,
+//         studentId: userId,
+//         status: "submitted",
+//         submittedAt,
+//         score: percentage,
+//         answers,
+//       },
+//     });
+
+//     let certificateGenerated = false;
+
+//     if (percentage >= 70 && assessment.courseId) {
+//       // console.log("\n>>> ENTERING CERTIFICATE GENERATION BLOCK <<<");
+
+//       try {
+//         const certificateId = `CERT-${assessmentId}-${userId}-${Date.now()}`;
+
+//         const certificateData = {
+//           userId: userId,
+//           assessmentId: assessmentId,
+//           courseId: assessment.courseId,
+//           courseName: assessment.course?.title || "Course",
+//           studentName: req.user.fullName || req.user.email || "Student",
+//           score: percentage,
+//           completionDate: submittedAt,
+//           certificateId: certificateId,
+//         };
+
+//         // console.log(
+//         //   "Certificate data prepared:",
+//         //   JSON.stringify(certificateData, null, 2)
+//         // );
+//         // console.log("Attempting upsert...");
+
+//         const certificate = await prisma.certificate.upsert({
+//           where: {
+//             assessmentId_userId: {
+//               assessmentId: assessmentId,
+//               userId: userId,
+//             },
+//           },
+//           update: {
+//             score: percentage,
+//             completionDate: submittedAt,
+//           },
+//           create: certificateData,
+//         });
+
+//         certificateGenerated = true;
+//       } catch (certError) {
+//         console.error("\n❌ ❌ ❌ CERTIFICATE ERROR ❌ ❌ ❌");
+//       }
+//     } else {
+//       // console.log("\n>>> CERTIFICATE GENERATION SKIPPED <<<");
+//       // if (percentage < 70) {
+//       //   console.log(
+//       //     "❌ Reason: Score too low (need 70%, got " + percentage + "%)"
+//       //   );
+//       // }
+//       // if (!assessment.courseId) {
+//       //   console.log("❌ Reason: Assessment has no courseId");
+//       // }
+//     }
+
+//     res.json({
+//       attemptId: attempt.id,
+//       score: percentage,
+//       totalPoints,
+//       earnedPoints: score,
+//       submittedAt,
+//       attemptNumber: attemptCount + 1,
+//       attemptsRemaining: maxAttempts - (attemptCount + 1),
+//       maxAttempts,
+//       certificateGenerated,
+//     });
+//   } catch (e) {
+//     console.error("POST /assessments/:id/attempts error:", e);
+//     res.status(500).json({ error: "Internal error" });
+//   }
+// });
+
 router.post("/assessments/:id/attempts", protect, async (req, res) => {
   try {
     const assessmentId = String(req.params.id);
@@ -580,13 +767,23 @@ router.post("/assessments/:id/attempts", protect, async (req, res) => {
 
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-    const assessment = await prisma.assessment.findUnique({
-      where: { id: assessmentId },
-      include: {
-        questions: true,
-        course: { select: { id: true, title: true } },
-      },
-    });
+    // 1) Load assessment + course + user (for college/department)
+    const [assessment, user] = await Promise.all([
+      prisma.assessment.findUnique({
+        where: { id: assessmentId },
+        include: {
+          questions: true,
+          course: { select: { id: true, title: true, collegeId: true } },
+        },
+      }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          departmentId: true,
+          collegeId: true,
+        },
+      }),
+    ]);
 
     if (!assessment) return res.status(404).json({ error: "Not found" });
     if (!assessment.isPublished && !isAdmin(req)) {
@@ -612,7 +809,7 @@ router.post("/assessments/:id/attempts", protect, async (req, res) => {
     let score = 0;
     let totalPoints = 0;
 
-    // Your existing grading logic...
+    // grading logic unchanged
     for (const q of assessment.questions) {
       const pts = typeof q.points === "number" ? q.points : 1;
       totalPoints += pts;
@@ -673,6 +870,11 @@ router.post("/assessments/:id/attempts", protect, async (req, res) => {
       totalPoints > 0 ? Math.round((score / totalPoints) * 100) : 0;
     const submittedAt = new Date();
 
+    // NEW: derive IDs for attempt
+    const courseId = assessment.courseId || null;
+    const departmentId = user?.departmentId || null;
+    const collegeId = assessment.course?.collegeId || user?.collegeId || null;
+
     const attempt = await prisma.assessmentAttempt.create({
       data: {
         assessmentId,
@@ -681,14 +883,15 @@ router.post("/assessments/:id/attempts", protect, async (req, res) => {
         submittedAt,
         score: percentage,
         answers,
+        courseId, // NEW
+        departmentId, // NEW
+        collegeId, // NEW
       },
     });
 
     let certificateGenerated = false;
 
     if (percentage >= 70 && assessment.courseId) {
-      // console.log("\n>>> ENTERING CERTIFICATE GENERATION BLOCK <<<");
-
       try {
         const certificateId = `CERT-${assessmentId}-${userId}-${Date.now()}`;
 
@@ -703,13 +906,7 @@ router.post("/assessments/:id/attempts", protect, async (req, res) => {
           certificateId: certificateId,
         };
 
-        // console.log(
-        //   "Certificate data prepared:",
-        //   JSON.stringify(certificateData, null, 2)
-        // );
-        // console.log("Attempting upsert...");
-
-        const certificate = await prisma.certificate.upsert({
+        await prisma.certificate.upsert({
           where: {
             assessmentId_userId: {
               assessmentId: assessmentId,
@@ -725,18 +922,8 @@ router.post("/assessments/:id/attempts", protect, async (req, res) => {
 
         certificateGenerated = true;
       } catch (certError) {
-        console.error("\n❌ ❌ ❌ CERTIFICATE ERROR ❌ ❌ ❌");
+        console.error("\n❌ ❌ ❌ CERTIFICATE ERROR ❌ ❌ ❌", certError);
       }
-    } else {
-      // console.log("\n>>> CERTIFICATE GENERATION SKIPPED <<<");
-      // if (percentage < 70) {
-      //   console.log(
-      //     "❌ Reason: Score too low (need 70%, got " + percentage + "%)"
-      //   );
-      // }
-      // if (!assessment.courseId) {
-      //   console.log("❌ Reason: Assessment has no courseId");
-      // }
     }
 
     res.json({
@@ -812,7 +999,8 @@ router.get("/dashboard", protect, async (req, res) => {
   }
 });
 
-router.get("/assessments/:assessmentId/certificate",
+router.get(
+  "/assessments/:assessmentId/certificate",
   protect,
   async (req, res) => {
     try {
@@ -851,7 +1039,8 @@ router.get("/assessments/:assessmentId/certificate",
 );
 
 // UPDATE assessment
-router.put("/assessments/:id",
+router.put(
+  "/assessments/:id",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -941,7 +1130,8 @@ router.put("/assessments/:id",
   }
 );
 // DELETE assessment
-router.delete("/assessments/:id",
+router.delete(
+  "/assessments/:id",
   protect,
   authorize("ADMIN", "SUPERADMIN"),
   async (req, res) => {
@@ -982,5 +1172,37 @@ router.delete("/assessments/:id",
     }
   }
 );
+
+router.get("/scores", async (req, res) => {
+  try {
+    const { collegeId, departmentId, courseId } = req.query;
+    const where = {
+      status: "submitted", // matches DB value
+    };
+
+    if (collegeId) where.collegeId = String(collegeId);
+    if (departmentId) where.departmentId = String(departmentId);
+    if (courseId) where.courseId = String(courseId);
+
+    const attempts = await prisma.assessmentAttempt.findMany({
+      where,
+      orderBy: {
+        submittedAt: "desc",
+      },
+      select: {
+        id: true,
+        courseId: true,
+        studentId: true,
+        score: true,
+        submittedAt: true,
+      },
+    });
+
+    res.json({ success: true, data: attempts });
+  } catch (e) {
+    console.error("GET /scores error:", e);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 export default router;
