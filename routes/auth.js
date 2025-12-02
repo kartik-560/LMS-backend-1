@@ -1669,68 +1669,57 @@ router.put(
   }
 );
 
-router.delete(
-  "/me",
-  [body("password").optional().isLength({ min: 6 }), handleValidationErrors],
-  async (req, res, next) => {
-    try {
-      const me = await prisma.user.findUnique({ where: { id: req.user.id } });
-      if (!me)
-        return res
-          .status(404)
-          .json({ success: false, message: "User not found" });
-
-      // If credentials user, require password
-      if (
-        String(me.authProvider || "credentials").toLowerCase() === "credentials"
-      ) {
-        const pwd = req.body.password;
-        if (!pwd)
-          return res.status(400).json({
-            success: false,
-            message: "Password is required to delete your account",
-          });
-        const ok = await bcrypt.compare(pwd, me.password || "");
-        if (!ok)
-          return res
-            .status(400)
-            .json({ success: false, message: "Password is incorrect" });
-      }
-
-      const createdCount = await prisma.course.count({
-        where: { creatorId: req.user.id },
-      });
-      if (createdCount > 0)
-        return res.status(409).json({
-          success: false,
-          message:
-            "You are creator of courses. Reassign or delete those courses first.",
-        });
-
-      await prisma.$transaction(async (tx) => {
-        await tx.assessmentAttempt.deleteMany({
-          where: { studentId: req.user.id },
-        });
-        await tx.chapterProgress.deleteMany({
-          where: { studentId: req.user.id },
-        });
-        await tx.courseReview.deleteMany({ where: { studentId: req.user.id } });
-        await tx.enrollment.deleteMany({ where: { studentId: req.user.id } });
-        await tx.user.delete({ where: { id: req.user.id } });
-      });
-
-      res.json({ success: true, message: "Account deleted successfully" });
-    } catch (err) {
-      if (err.code === "P2003")
-        return res.status(409).json({
-          success: false,
-          message:
-            "Cannot delete due to related data. Consider soft delete (isActive=false).",
-        });
-      next(err);
+router.delete("/me", async (req, res, next) => {
+  try {
+    // Only super admin (adjust role name if needed)
+    if (req.user.role !== "SUPERADMIN") {
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized to delete users" });
     }
+
+    const targetUserId = req.query.targetId;
+    if (!targetUserId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "targetId is required" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.assessmentAttempt.deleteMany({
+        where: { studentId: targetUserId },
+      });
+      await tx.chapterProgress.deleteMany({
+        where: { studentId: targetUserId },
+      });
+      await tx.enrollment.deleteMany({
+        where: { studentId: targetUserId },
+      });
+      await tx.user.delete({ where: { id: targetUserId } });
+    });
+
+    return res.json({
+      success: true,
+      message: "User deleted successfully",
+    });
+  } catch (err) {
+    if (err.code === "P2003") {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Cannot delete due to related data. Consider soft delete (isActive=false).",
+      });
+    }
+    return next(err);
   }
-);
+});
 
 router.patch(
   "/users/:id/active",
