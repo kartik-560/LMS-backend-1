@@ -367,6 +367,15 @@ router.post("/signup-google", async (req, res) => {
       console.log(`[Signup Google] User updated in user table: ${user.id}`);
     }
 
+    const nextTokenVersion = (user.tokenVersion ?? 0) + 1;
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        tokenVersion: nextTokenVersion,
+        lastLogin: new Date(), // optional but recommended
+      },
+    });
+
     // ✅ Verify role is set
     if (!user.role) {
       return res.status(500).json({
@@ -381,6 +390,7 @@ router.post("/signup-google", async (req, res) => {
         id: user.id,
         email: user.email,
         role: user.role,
+        tokenVersion: nextTokenVersion,
       },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
@@ -402,6 +412,7 @@ router.post("/signup-google", async (req, res) => {
           mobile: user.mobile,
           academicYear: user.academicYear,
           rollNumber: user.rollNumber,
+          tokenVersion: nextTokenVersion,
         },
         token,
       },
@@ -991,7 +1002,7 @@ router.post(
 
     const otp = genOtp();
     const otpHash = await hashOtp(otp);
-    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
     await prisma.registration.update({
       where: { id: reg.id },
@@ -1001,9 +1012,26 @@ router.post(
     try {
       await sendEmail({
         to: email,
-        subject: "Your OTP Code",
-        text: `Your OTP is ${otp}. It expires in 10 minutes.`,
-        html: `<p>Your OTP is <b>${otp}</b>. It expires in 10 minutes.</p>`,
+        subject: "Your One‑Time Password (OTP) for PugArch LMS",
+        text: [
+          "Dear User,",
+          "",
+          `Your one-time password (OTP) is: ${otp}`,
+          "",
+          "This code is valid for 10 minutes. Please do not share it with anyone.",
+          "",
+          "If you did not request this code, you can safely ignore this email.",
+          "",
+          "Best regards,",
+          "PugArch LMS Team",
+        ].join("\n"),
+        html: `
+    <p>Dear User,</p>
+    <p>Your one-time password (OTP) is: <strong>${otp}</strong></p>
+    <p>This code is valid for <strong>10 minutes</strong>. Please do not share it with anyone.</p>
+    <p>If you did not request this code, you can safely ignore this email.</p>
+    <p>Best regards,<br/>PugArch LMS Team</p>
+  `,
       });
     } catch (_e) {
       return res
@@ -1204,13 +1232,12 @@ router.post(
           email: email,
           fullName: fullName,
           role: roleLower,
-          password: password, 
+          password: password,
           mobile: mobile,
         });
         console.log("✅ Registration email sent successfully to:", email);
       } catch (emailError) {
         console.error("⚠️ Failed to send registration email:", emailError);
-        
       }
 
       res.status(201).json({

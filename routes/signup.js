@@ -1,11 +1,22 @@
 import express from "express";
 import { body } from "express-validator";
-import { handleValidationErrors } from "../utils/validationHelpers.js"; // Assuming you have this helper for validation errors
-
+import { handleValidationErrors } from "../utils/validationHelpers.js";
+import jwt from "jsonwebtoken";
 import { prisma } from "../config/prisma.js";
 import bcrypt from "bcryptjs";
 
 const router = express.Router();
+
+const signToken = (user) =>
+  jwt.sign(
+    {
+      sub: user.id,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
+    },
+    process.env.JWT_SECRET || "dev-secret",
+    { expiresIn: "7d" }
+  );
 const normalizeEmail = (e) =>
   typeof e === "string" ? e.trim().toLowerCase() : e;
 // Your existing signup complete route
@@ -96,15 +107,15 @@ router.post(
       const result = await prisma.$transaction(async (tx) => {
         const createdUser = await tx.user.create({
           data: userData,
-          select: {
-            id: true,
-            email: true,
-            fullName: true,
-            role: true,
-            isActive: true,
-            permissions: true,
-            authProvider: true,
-          },
+          // select: {
+          //   id: true,
+          //   email: true,
+          //   fullName: true,
+          //   role: true,
+          //   isActive: true,
+          //   permissions: true,
+          //   authProvider: true,
+          // },
         });
 
         await tx.registration.update({
@@ -115,12 +126,37 @@ router.post(
         return createdUser;
       });
 
+      const nextVersion = (result.tokenVersion ?? 0) + 1;
+      const updatedUser = await prisma.user.update({
+        where: { id: result.id },
+        data: { lastLogin: new Date(), tokenVersion: nextVersion },
+      });
+
+      const token = signToken({
+        id: updatedUser.id,
+        tokenVersion: nextVersion,
+      });
+
+      const payload = {
+        id: updatedUser.id,
+        fullName: updatedUser.fullName,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        isActive: updatedUser.isActive,
+        permissions: updatedUser.permissions || {},
+        authProvider: updatedUser.authProvider,
+        collegeId: updatedUser.collegeId,
+        departmentId: updatedUser.departmentId,
+        tokenVersion: nextVersion,
+      };
+
       return res.status(201).json({
         success: true,
-        message: "Account created. Please log in to receive a token.",
-        data: { user: result },
+        message: "Account created successfully",
+        data: { user: payload, token },
       });
     } catch (err) {
+      console.error("Signup complete error:", err);
       if (err?.code === "P2002") {
         return res
           .status(400)
