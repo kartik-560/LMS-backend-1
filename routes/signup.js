@@ -130,6 +130,14 @@ router.post(
       const updatedUser = await prisma.user.update({
         where: { id: result.id },
         data: { lastLogin: new Date(), tokenVersion: nextVersion },
+        include: {
+          department: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
       });
 
       const token = signToken({
@@ -147,6 +155,7 @@ router.post(
         authProvider: updatedUser.authProvider,
         collegeId: updatedUser.collegeId,
         departmentId: updatedUser.departmentId,
+        departmentName: updatedUser.department?.name || null,
         tokenVersion: nextVersion,
       };
 

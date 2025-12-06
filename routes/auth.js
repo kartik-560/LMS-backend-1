@@ -159,6 +159,14 @@ router.post("/google-login", async (req, res) => {
 
     const user = await prisma.user.findUnique({
       where: { email },
+      include: {
+        department: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
     });
 
     if (!user) {
@@ -229,6 +237,7 @@ router.post("/google-login", async (req, res) => {
           collegeId: user.collegeId,
           departmentId: user.departmentId,
           tokenVersion: nextTokenVersion,
+          departmentName: user.department?.name || null,
         },
         token,
       },
@@ -326,6 +335,14 @@ router.post("/signup-google", async (req, res) => {
     // ✅ NOW CREATE USER RECORD WITH ALL REGISTRATION DATA
     let user = await prisma.user.findUnique({
       where: { email },
+      include: {
+        department: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
     });
 
     if (!user) {
@@ -341,7 +358,6 @@ router.post("/signup-google", async (req, res) => {
           authProvider: "google",
           collegeId: registration.collegeId,
           departmentId: registration.departmentId,
-          // ✅ ADD THESE FIELDS FROM REGISTRATION
           year: registration.year,
           mobile: registration.mobile,
           academicYear: registration.academicYear,
@@ -407,7 +423,7 @@ router.post("/signup-google", async (req, res) => {
           role: user.role,
           collegeId: user.collegeId,
           departmentId: user.departmentId,
-          // ✅ INCLUDE ADDITIONAL FIELDS IN RESPONSE
+          departmentName: user.department?.name || null,
           year: user.year,
           mobile: user.mobile,
           academicYear: user.academicYear,
@@ -1269,6 +1285,14 @@ router.post("/login", async (req, res, next) => {
 
     const user = await prisma.user.findUnique({
       where: { email: normalizeEmail(email) },
+      include: {
+        department: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
     });
     if (!user) {
       return res
@@ -1330,6 +1354,7 @@ router.post("/login", async (req, res, next) => {
       authProvider: user.authProvider,
       collegeId: user.collegeId,
       tokenVersion: nextVersion,
+      departmentName: user.department?.name || null,
     };
 
     res.json({ success: true, data: { user: payload, token } });
@@ -1696,55 +1721,137 @@ router.put(
   }
 );
 
-router.delete("/me", async (req, res, next) => {
+// router.delete("/me", async (req, res, next) => {
+//   try {
+//     if (req.user.role !== "SUPERADMIN") {
+//       return res
+//         .status(403)
+//         .json({ success: false, message: "Not authorized to delete users" });
+//     }
+
+//     const targetUserId = req.query.targetId;
+//     if (!targetUserId) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "targetId is required" });
+//     }
+
+//     const user = await prisma.user.findUnique({ where: { id: targetUserId } });
+//     if (!user) {
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "User not found" });
+//     }
+
+//     await prisma.$transaction(async (tx) => {
+//       await tx.assessmentAttempt.deleteMany({
+//         where: { studentId: targetUserId },
+//       });
+//       await tx.chapterProgress.deleteMany({
+//         where: { studentId: targetUserId },
+//       });
+//       await tx.enrollment.deleteMany({
+//         where: { studentId: targetUserId },
+//       });
+//       await tx.user.delete({ where: { id: targetUserId } });
+//     });
+
+//     return res.json({
+//       success: true,
+//       message: "User deleted successfully",
+//     });
+//   } catch (err) {
+//     if (err.code === "P2003") {
+//       return res.status(409).json({
+//         success: false,
+//         message:
+//           "Cannot delete due to related data. Consider soft delete (isActive=false).",
+//       });
+//     }
+//     return next(err);
+//   }
+// });
+
+router.delete("/admin/users", async (req, res, next) => {
   try {
-    // Only super admin (adjust role name if needed)
-    if (req.user.role !== "SUPERADMIN") {
-      return res
-        .status(403)
-        .json({ success: false, message: "Not authorized to delete users" });
+    console.log("req.user:", req.user); // ← Check auth
+    console.log("req.user.role:", req.user?.role); // ← Check role
+    console.log("req.query:", req.query); // ← Check params
+
+    // Must be superadmin and provide userId
+    if (req.user.role !== "SUPERADMIN" || !req.query.userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Superadmin access required with userId parameter",
+      });
     }
 
-    const targetUserId = req.query.targetId;
-    if (!targetUserId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "targetId is required" });
-    }
+    const targetUserId = req.query.userId;
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+    });
 
-    const user = await prisma.user.findUnique({ where: { id: targetUserId } });
-    if (!user) {
+    if (!targetUser || !targetUser.isActive)
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
-    }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.assessmentAttempt.deleteMany({
-        where: { studentId: targetUserId },
-      });
-      await tx.chapterProgress.deleteMany({
-        where: { studentId: targetUserId },
-      });
-      await tx.enrollment.deleteMany({
-        where: { studentId: targetUserId },
-      });
-      await tx.user.delete({ where: { id: targetUserId } });
-    });
-
-    return res.json({
-      success: true,
-      message: "User deleted successfully",
-    });
-  } catch (err) {
-    if (err.code === "P2003") {
-      return res.status(409).json({
+    // Prevent deleting other superadmins
+    if (targetUser.role === "superadmin") {
+      return res.status(403).json({
         success: false,
-        message:
-          "Cannot delete due to related data. Consider soft delete (isActive=false).",
+        message: "Cannot delete superadmin accounts",
       });
     }
-    return next(err);
+
+    // Soft delete user and all related data in a transaction
+    await prisma.$transaction(async (tx) => {
+      const now = new Date();
+
+      // Soft delete assessment attempts
+      await tx.assessmentAttempt.updateMany({
+        where: { studentId: targetUserId },
+        data: { deletedAt: now },
+      });
+
+      // Soft delete chapter progress
+      await tx.chapterProgress.updateMany({
+        where: { studentId: targetUserId },
+        data: { deletedAt: now },
+      });
+
+      // Soft delete enrollments
+      await tx.enrollment.updateMany({
+        where: { studentId: targetUserId },
+        data: { deletedAt: now },
+      });
+
+      // Soft delete certificates
+      await tx.certificate.updateMany({
+        where: { userId: targetUserId },
+        data: { deletedAt: now },
+      });
+
+      // Soft delete related registrations (matching email)
+      await tx.registration.updateMany({
+        where: { email: targetUser.email },
+        data: { deletedAt: now },
+      });
+
+      // Finally, soft delete the user
+      await tx.user.update({
+        where: { id: targetUserId },
+        data: {
+          isActive: false,
+          deletedAt: now,
+          tokenVersion: { increment: 1 },
+        },
+      });
+    });
+
+    res.json({ success: true, message: "User deleted successfully" });
+  } catch (err) {
+    next(err);
   }
 });
 

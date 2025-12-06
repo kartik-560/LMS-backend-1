@@ -273,6 +273,7 @@ router.get(
           role: true,
           collegeId: true,
           isActive: true,
+          deletedAt: true,
           permissions: true,
           college: {
             select: {
@@ -291,9 +292,10 @@ router.get(
         role: u.role,
         collegeId: String(u.collegeId || ""),
         isActive: u.isActive,
+        deletedAt: u.deletedAt,
         permissions: u.permissions || {},
         college: u.college,
-         status: u.isActive ? "Active" : "Inactive",
+        status: u.isActive ? "Active" : "Inactive",
       }));
 
       return res.json(payload);
@@ -302,7 +304,6 @@ router.get(
     }
   }
 );
-
 
 router.get(
   "/instructors",
@@ -327,6 +328,7 @@ router.get(
           collegeId: true,
           departmentId: true,
           isActive: true,
+          deletedAt: true,
           permissions: true,
           college: {
             select: {
@@ -353,6 +355,7 @@ router.get(
         collegeName: u.college?.name || null,
         departmentId: String(u.departmentId || ""),
         isActive: u.isActive,
+        deletedAt: u.deletedAt,
         permissions: u.permissions || {},
         avatar: u.avatar,
         college: u.college,
@@ -389,6 +392,7 @@ router.get(
           mobile: true,
           role: true,
           isActive: true,
+          deletedAt: true,
           status: true,
           collegeId: true,
           departmentId: true,
@@ -454,6 +458,7 @@ router.get(
 
         return {
           ...toUserPayload(u),
+          deletedAt: u.deletedAt,
           enrolledCoursesCount: u._count?.enrollments || 0,
           finalTests,
           interviews,
@@ -903,27 +908,91 @@ router.patch(
   }
 );
 
+// router.delete("/courses/:id", requireSuperAdmin, async (req, res) => {
+//   const { id } = req.params;
+
+//   await prisma.assessmentAttempt.deleteMany({
+//     where: { assessment: { courseId: id } },
+//   });
+//   await prisma.assessmentQuestion.deleteMany({
+//     where: { assessment: { courseId: id } },
+//   });
+//   await prisma.assessment.deleteMany({ where: { courseId: id } });
+
+//   await prisma.chapterProgress.deleteMany({
+//     where: { chapter: { courseId: id } },
+//   });
+//   await prisma.chapter.deleteMany({ where: { courseId: id } });
+
+//   await prisma.courseReview.deleteMany({ where: { courseId: id } });
+//   await prisma.enrollment.deleteMany({ where: { courseId: id } });
+//   await prisma.coursesAssigned.deleteMany({ where: { courseId: id } });
+
+//   await prisma.course.delete({ where: { id } });
+//   res.json({ ok: true });
+// });
+
 router.delete("/courses/:id", requireSuperAdmin, async (req, res) => {
   const { id } = req.params;
 
-  await prisma.assessmentAttempt.deleteMany({
-    where: { assessment: { courseId: id } },
-  });
-  await prisma.assessmentQuestion.deleteMany({
-    where: { assessment: { courseId: id } },
-  });
-  await prisma.assessment.deleteMany({ where: { courseId: id } });
+  await prisma.$transaction(async (tx) => {
+    const now = new Date();
 
-  await prisma.chapterProgress.deleteMany({
-    where: { chapter: { courseId: id } },
+    // Soft delete assessment attempts related to this course's assessments
+    await tx.assessmentAttempt.updateMany({
+      where: { assessment: { courseId: id } },
+      data: { deletedAt: now },
+    });
+
+    // Soft delete assessment questions related to this course's assessments
+    await tx.assessmentQuestion.updateMany({
+      where: { assessment: { courseId: id } },
+      data: { deletedAt: now },
+    });
+
+    // Soft delete assessments
+    await tx.assessment.updateMany({
+      where: { courseId: id },
+      data: { deletedAt: now },
+    });
+
+    // Soft delete chapter progress related to this course's chapters
+    await tx.chapterProgress.updateMany({
+      where: { chapter: { courseId: id } },
+      data: { deletedAt: now },
+    });
+
+    // Soft delete chapters
+    await tx.chapter.updateMany({
+      where: { courseId: id },
+      data: { deletedAt: now },
+    });
+
+    // Soft delete enrollments
+    await tx.enrollment.updateMany({
+      where: { courseId: id },
+      data: { deletedAt: now },
+    });
+
+    // Soft delete courses assigned
+    await tx.coursesAssigned.updateMany({
+      where: { courseId: id },
+      data: { deletedAt: now },
+    });
+
+    // Soft delete certificates
+    await tx.certificate.updateMany({
+      where: { courseId: id },
+      data: { deletedAt: now },
+    });
+
+    // Finally, soft delete the course
+    await tx.course.update({
+      where: { id },
+      data: { deletedAt: now },
+    });
   });
-  await prisma.chapter.deleteMany({ where: { courseId: id } });
 
-  await prisma.courseReview.deleteMany({ where: { courseId: id } });
-  await prisma.enrollment.deleteMany({ where: { courseId: id } });
-  await prisma.coursesAssigned.deleteMany({ where: { courseId: id } });
-
-  await prisma.course.delete({ where: { id } });
   res.json({ ok: true });
 });
 

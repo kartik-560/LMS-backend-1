@@ -27,6 +27,7 @@ model User {
   isActive                 Boolean   @default(true)
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
+  deletedAt                DateTime?
   fullName                 String    @db.VarChar(100)
   year                     String?   @db.VarChar(10)
 
@@ -67,9 +68,9 @@ model Registration {
 
   otpHash    String?
   otpExpires DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  deletedAt  DateTime?
   college    College     @relation(fields: [collegeId], references: [id], onDelete: Cascade)
   department Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
 
@@ -82,23 +83,23 @@ model Registration {
 }
 
 model College {
-  id              String       @id @default(uuid())
-  contactPerson   String       @db.VarChar(150)
-  name            String       @db.VarChar(200)
-  mobileNumber    String       @db.VarChar(20)
-  studentLimit    Int          @default(1)
-  validity        DateTime
-  email           String       @db.VarChar(150)
-  status          Int          @default(1)
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  permissions     Json?
-  departments     Department[]
-  departmentLimit Int          @default(1)
-  adminLimit      Int          @default(1)
-  instructorLimit Int          @default(1)
+  id            String       @id @default(uuid())
+  contactPerson String       @db.VarChar(150)
+  name          String       @db.VarChar(200)
+  mobileNumber  String       @db.VarChar(20)
+  studentLimit  Int          @default(1)
+  validity      DateTime
+  email         String       @db.VarChar(150)
+  status        Int          @default(1)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  permissions   Json?
+  departments   Department[]
 
-  courses Course[]
+  adminLimit      Int      @default(1)
+  instructorLimit Int      @default(1)
+  departmentLimit Int      @default(1)
+  courses         Course[]
 
   users             User[]
   Registration      Registration[]
@@ -130,18 +131,19 @@ model Department {
 }
 
 model Course {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   title       String
   thumbnail   String?
-  status      String   @default("draft")
+  status      String    @default("draft")
   creatorId   String
   collegeId   String?
-  college     College? @relation(fields: [collegeId], references: [id])
+  college     College?  @relation(fields: [collegeId], references: [id])
   category    String?
   description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  creator     User     @relation("CourseCreator", fields: [creatorId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  creator     User      @relation("CourseCreator", fields: [creatorId], references: [id])
 
   madeBySuperAdmin  Boolean             @default(true)
   enrollments       Enrollment[]
@@ -163,9 +165,9 @@ model CoursesAssigned {
   departmentId String?
   capacity     Int?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  deletedAt  DateTime?
   course     Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
   college    College     @relation(fields: [collegeId], references: [id], onDelete: Cascade)
   department Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
@@ -187,6 +189,7 @@ model Enrollment {
   duration     Int? // in minutes
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
   departmentId String?
   student      User        @relation(fields: [studentId], references: [id])
   course       Course      @relation(fields: [courseId], references: [id])
@@ -212,6 +215,7 @@ model Chapter {
   settings    Json              @default("{\"allowNotes\": true, \"allowComments\": true, \"allowDownloads\": true}")
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
+  deletedAt   DateTime?
   assessments Assessment[]
   progress    ChapterProgress[]
   course      Course            @relation(fields: [courseId], references: [id], onDelete: Cascade)
@@ -231,6 +235,7 @@ model ChapterProgress {
   studentId   String
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
   chapter     Chapter   @relation(fields: [chapterId], references: [id], onDelete: Cascade)
   student     User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
@@ -253,6 +258,7 @@ model Assessment {
   chapterId        String?
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
+  deletedAt        DateTime?
   questions        AssessmentQuestion[]
   attempts         AssessmentAttempt[]
   certificates     Certificate[]
@@ -267,7 +273,7 @@ model Assessment {
 }
 
 model Certificate {
-  id             String   @id @default(cuid())
+  id             String     @id @default(cuid())
   userId         String
   assessmentId   String
   courseId       String
@@ -275,14 +281,14 @@ model Certificate {
   studentName    String
   score          Float
   completionDate DateTime
-  certificateId  String   @unique
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
+  certificateId  String     @unique
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  deletedAt      DateTime?
   // Relations
-  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  course     Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assessment     Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  course         Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
 
   @@unique([assessmentId, userId])
   @@index([userId])
@@ -305,6 +311,7 @@ model AssessmentQuestion {
   sampleAnswer         String?
   points               Int        @default(1)
   order                Int        @default(1)
+  deletedAt            DateTime?
   assessment           Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
 
   @@index([assessmentId])
@@ -319,7 +326,7 @@ model AssessmentAttempt {
   status       String    @default("in_progress")
   score        Int?
   answers      Json?
-
+  deletedAt    DateTime?
   departmentId String?
   courseId     String?
   collegeId    String?
