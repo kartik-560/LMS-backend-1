@@ -126,47 +126,6 @@ router.post(
   }
 );
 
-// router.get("/chapters/:chapterId/assessments", protect, async (req, res) => {
-//   try {
-//     const { chapterId } = req.params;
-
-//     const chapterExists = await prisma.chapter.findUnique({
-//       where: { id: String(chapterId) },
-//       select: { id: true },
-//     });
-
-//     if (!chapterExists) {
-//       return res.status(404).json({ error: "Chapter not found" });
-//     }
-
-//     const assessments = await prisma.assessment.findMany({
-//       where: {
-//         chapterId: String(chapterId),
-//         scope: "chapter",
-//         ...(isAdmin(req) ? {} : { isPublished: true }),
-//       },
-//       orderBy: {
-//         order: "asc",
-//       },
-//       select: {
-//         id: true,
-//         title: true,
-//         type: true,
-//         scope: true,
-//         order: true,
-//         isPublished: true,
-//         timeLimitSeconds: true,
-//         maxAttempts: true,
-//       },
-//     });
-
-//     return res.status(200).json(assessments);
-//   } catch (e) {
-//     console.error("GET /chapters/:chapterId/assessments error:", e);
-//     return res.status(500).json({ error: "Internal error" });
-//   }
-// });
-
 router.get("/chapters/:chapterId/assessments", protect, async (req, res) => {
   try {
     const { chapterId } = req.params;
@@ -215,8 +174,9 @@ router.post(
       const {
         title,
         type = "final_test",
-        timeLimitSeconds = null,
-        maxAttempts = 1,
+        timeLimitSeconds,
+        maxAttempts, // ✅ No default - must be provided
+        passingMark, // ✅ No default - must be provided
         isPublished = true,
         questions = [],
       } = req.body;
@@ -228,6 +188,48 @@ router.post(
 
       if (!course) {
         return res.status(404).json({ error: "Course not found" });
+      }
+
+      // ✅ Validate maxAttempts is provided
+      if (!maxAttempts || !Number.isFinite(Number(maxAttempts))) {
+        return res.status(400).json({
+          error: "maxAttempts is required and must be a valid number",
+        });
+      }
+
+      const validatedMaxAttempts = Number(maxAttempts);
+      if (validatedMaxAttempts < 1) {
+        return res.status(400).json({
+          error: "maxAttempts must be at least 1",
+        });
+      }
+
+      // ✅ Validate passingMark is provided
+      if (passingMark === undefined || passingMark === null) {
+        return res.status(400).json({
+          error: "passingMark is required",
+        });
+      }
+
+      const validatedPassingMark = Number(passingMark);
+      if (
+        !Number.isFinite(validatedPassingMark) ||
+        validatedPassingMark < 0 ||
+        validatedPassingMark > 100
+      ) {
+        return res.status(400).json({
+          error: "passingMark must be a number between 0 and 100",
+        });
+      }
+
+      // ✅ Validate timeLimitSeconds if provided
+      if (timeLimitSeconds !== null && timeLimitSeconds !== undefined) {
+        const validatedTime = Number(timeLimitSeconds);
+        if (!Number.isFinite(validatedTime) || validatedTime < 60) {
+          return res.status(400).json({
+            error: "timeLimitSeconds must be at least 60 seconds (1 minute)",
+          });
+        }
       }
 
       // Check if a final test already exists for this course
@@ -251,8 +253,9 @@ router.post(
           title: String(title || "Final Test"),
           type,
           scope: "course",
-          timeLimitSeconds,
-          maxAttempts,
+          timeLimitSeconds: timeLimitSeconds ? Number(timeLimitSeconds) : null,
+          maxAttempts: validatedMaxAttempts, // ✅ User-provided value
+          passingMark: validatedPassingMark, // ✅ User-provided value
           isPublished,
           order: 999,
           courseId: course.id,
@@ -508,6 +511,76 @@ router.get("/assessments", protect, async (req, res) => {
   }
 });
 
+// router.get("/assessments/:id", protect, async (req, res) => {
+//   try {
+//     const a = await prisma.assessment.findUnique({
+//       where: { id: String(req.params.id) },
+//       include: {
+//         questions: {
+//           orderBy: [{ order: "asc" }, { id: "asc" }],
+//         },
+//         chapter: {
+//           select: { id: true, title: true },
+//         },
+//         course: {
+//           select: { id: true, title: true },
+//         },
+//       },
+//     });
+
+//     if (!a) return res.status(404).json({ error: "Not found" });
+
+//     if (!a.isPublished && !isAdmin(req)) {
+//       return res.status(403).json({ error: "Forbidden" });
+//     }
+
+//     // ✅ Use studentId instead of userId
+//     const attemptCount = await prisma.assessmentAttempt.count({
+//       where: {
+//         assessmentId: String(req.params.id),
+//         studentId: req.user.id, // Changed from userId to studentId
+//       },
+//     });
+
+//     // ✅ Use studentId instead of userId
+//     const existingAttempt = await prisma.assessmentAttempt.findFirst({
+//       where: {
+//         assessmentId: String(req.params.id),
+//         studentId: req.user.id, // Changed from userId to studentId
+//       },
+//       orderBy: { submittedAt: "desc" },
+//     });
+
+//     const maxAttempts = a.maxAttempts || 1;
+    
+
+//     if (attemptCount >= maxAttempts && existingAttempt) {
+//       return res.json({
+//         ...a,
+//         alreadyAttempted: true,
+//         attemptsUsed: attemptCount,
+//         maxAttempts: maxAttempts,
+//         attemptResult: {
+//           score: existingAttempt.score,
+//           submittedAt: existingAttempt.submittedAt,
+//           earnedPoints: existingAttempt.earnedPoints,
+//           totalPoints: existingAttempt.totalPoints,
+//         },
+//       });
+//     }
+
+//     res.json({
+//       ...a,
+//       attemptsUsed: attemptCount,
+//       maxAttempts: maxAttempts,
+//       attemptsRemaining: maxAttempts - attemptCount,
+//     });
+//   } catch (e) {
+//     console.error("GET /assessments/:id error:", e);
+//     res.status(500).json({ error: "Internal error" });
+//   }
+// });
+
 router.get("/assessments/:id", protect, async (req, res) => {
   try {
     const a = await prisma.assessment.findUnique({
@@ -531,234 +604,63 @@ router.get("/assessments/:id", protect, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    // ✅ Use studentId instead of userId
+    // ✅ Count only completed attempts (not in_progress)
     const attemptCount = await prisma.assessmentAttempt.count({
       where: {
         assessmentId: String(req.params.id),
-        studentId: req.user.id, // Changed from userId to studentId
+        studentId: req.user.id,
+        deletedAt: null,
+        status: { not: "in_progress" }, // Only count submitted attempts
       },
     });
 
-    // ✅ Use studentId instead of userId
-    const existingAttempt = await prisma.assessmentAttempt.findFirst({
+    // ✅ Get latest completed attempt
+    const latestAttempt = await prisma.assessmentAttempt.findFirst({
       where: {
         assessmentId: String(req.params.id),
-        studentId: req.user.id, // Changed from userId to studentId
+        studentId: req.user.id,
+        deletedAt: null,
+        status: { not: "in_progress" },
       },
       orderBy: { submittedAt: "desc" },
     });
 
     const maxAttempts = a.maxAttempts || 1;
+    const attemptsRemaining = Math.max(0, maxAttempts - attemptCount);
+    const alreadyAttempted = attemptCount > 0;
 
-    if (attemptCount >= maxAttempts && existingAttempt) {
-      return res.json({
-        ...a,
-        alreadyAttempted: true,
-        attemptsUsed: attemptCount,
-        maxAttempts: maxAttempts,
-        attemptResult: {
-          score: existingAttempt.score,
-          submittedAt: existingAttempt.submittedAt,
-          earnedPoints: existingAttempt.earnedPoints,
-          totalPoints: existingAttempt.totalPoints,
-        },
-      });
-    }
+    // ✅ Calculate points
+    const totalPoints = a.questions.reduce((sum, q) => sum + (q.points || 1), 0);
+    const earnedPoints = latestAttempt?.score
+      ? Math.round((latestAttempt.score / 100) * totalPoints)
+      : 0;
 
-    res.json({
+    // ✅ Always return attempt info for students
+    const response = {
       ...a,
-      attemptsUsed: attemptCount,
-      maxAttempts: maxAttempts,
-      attemptsRemaining: maxAttempts - attemptCount,
-    });
+      alreadyAttempted,
+      attemptCount,
+      maxAttempts,
+      attemptsRemaining,
+      attemptResult: alreadyAttempted
+        ? {
+            score: latestAttempt?.score ?? 0,
+            submittedAt: latestAttempt?.submittedAt,
+            attemptNumber: attemptCount,
+            attemptsRemaining,
+            maxAttempts,
+            totalPoints,
+            earnedPoints,
+          }
+        : null,
+    };
+
+    return res.json(response);
   } catch (e) {
     console.error("GET /assessments/:id error:", e);
     res.status(500).json({ error: "Internal error" });
   }
 });
-
-// router.post("/assessments/:id/attempts", protect, async (req, res) => {
-//   try {
-//     const assessmentId = String(req.params.id);
-//     const userId = req.user?.id;
-
-//     if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
-//     const assessment = await prisma.assessment.findUnique({
-//       where: { id: assessmentId },
-//       include: {
-//         questions: true,
-//         course: { select: { id: true, title: true } },
-//       },
-//     });
-
-//     if (!assessment) return res.status(404).json({ error: "Not found" });
-//     if (!assessment.isPublished && !isAdmin(req)) {
-//       return res.status(403).json({ error: "Forbidden" });
-//     }
-
-//     const attemptCount = await prisma.assessmentAttempt.count({
-//       where: {
-//         assessmentId,
-//         studentId: userId,
-//         status: "submitted",
-//       },
-//     });
-
-//     const maxAttempts = assessment.maxAttempts || 1;
-//     if (attemptCount >= maxAttempts) {
-//       return res.status(400).json({
-//         error: `Maximum attempts (${maxAttempts}) reached.`,
-//       });
-//     }
-
-//     const answers = req.body?.answers || {};
-//     let score = 0;
-//     let totalPoints = 0;
-
-//     // Your existing grading logic...
-//     for (const q of assessment.questions) {
-//       const pts = typeof q.points === "number" ? q.points : 1;
-//       totalPoints += pts;
-//       const ans = answers[q.id];
-
-//       if (typeof q.correctOptionIndex === "number") {
-//         if (Number(ans) === q.correctOptionIndex) score += pts;
-//         continue;
-//       }
-
-//       if (
-//         Array.isArray(q.correctOptionIndexes) &&
-//         q.correctOptionIndexes.length
-//       ) {
-//         const normalized = Array.isArray(ans) ? ans.map(Number).sort() : [];
-//         const correct = [...q.correctOptionIndexes].sort();
-//         if (
-//           normalized.length === correct.length &&
-//           normalized.every((v, i) => v === correct[i])
-//         ) {
-//           score += pts;
-//         }
-//         continue;
-//       }
-
-//       if (q.correctText) {
-//         const userAns = String(ans || "")
-//           .trim()
-//           .toLowerCase();
-//         const correctAns = String(q.correctText).trim().toLowerCase();
-//         if (userAns === correctAns) score += pts;
-//         continue;
-//       }
-
-//       if (q.pairs) {
-//         try {
-//           const pairs =
-//             typeof q.pairs === "string" ? JSON.parse(q.pairs) : q.pairs;
-//           const userPairs = ans || {};
-//           let correctCount = 0;
-//           pairs.forEach((pair, idx) => {
-//             if (
-//               userPairs[idx] &&
-//               userPairs[idx].toLowerCase().trim() ===
-//                 pair.right.toLowerCase().trim()
-//             ) {
-//               correctCount++;
-//             }
-//           });
-//           if (correctCount === pairs.length) score += pts;
-//         } catch (e) {
-//           console.error("Error grading match question:", e);
-//         }
-//       }
-//     }
-
-//     const percentage =
-//       totalPoints > 0 ? Math.round((score / totalPoints) * 100) : 0;
-//     const submittedAt = new Date();
-
-//     const attempt = await prisma.assessmentAttempt.create({
-//       data: {
-//         assessmentId,
-//         studentId: userId,
-//         status: "submitted",
-//         submittedAt,
-//         score: percentage,
-//         answers,
-//       },
-//     });
-
-//     let certificateGenerated = false;
-
-//     if (percentage >= 70 && assessment.courseId) {
-//       // console.log("\n>>> ENTERING CERTIFICATE GENERATION BLOCK <<<");
-
-//       try {
-//         const certificateId = `CERT-${assessmentId}-${userId}-${Date.now()}`;
-
-//         const certificateData = {
-//           userId: userId,
-//           assessmentId: assessmentId,
-//           courseId: assessment.courseId,
-//           courseName: assessment.course?.title || "Course",
-//           studentName: req.user.fullName || req.user.email || "Student",
-//           score: percentage,
-//           completionDate: submittedAt,
-//           certificateId: certificateId,
-//         };
-
-//         // console.log(
-//         //   "Certificate data prepared:",
-//         //   JSON.stringify(certificateData, null, 2)
-//         // );
-//         // console.log("Attempting upsert...");
-
-//         const certificate = await prisma.certificate.upsert({
-//           where: {
-//             assessmentId_userId: {
-//               assessmentId: assessmentId,
-//               userId: userId,
-//             },
-//           },
-//           update: {
-//             score: percentage,
-//             completionDate: submittedAt,
-//           },
-//           create: certificateData,
-//         });
-
-//         certificateGenerated = true;
-//       } catch (certError) {
-//         console.error("\n❌ ❌ ❌ CERTIFICATE ERROR ❌ ❌ ❌");
-//       }
-//     } else {
-//       // console.log("\n>>> CERTIFICATE GENERATION SKIPPED <<<");
-//       // if (percentage < 70) {
-//       //   console.log(
-//       //     "❌ Reason: Score too low (need 70%, got " + percentage + "%)"
-//       //   );
-//       // }
-//       // if (!assessment.courseId) {
-//       //   console.log("❌ Reason: Assessment has no courseId");
-//       // }
-//     }
-
-//     res.json({
-//       attemptId: attempt.id,
-//       score: percentage,
-//       totalPoints,
-//       earnedPoints: score,
-//       submittedAt,
-//       attemptNumber: attemptCount + 1,
-//       attemptsRemaining: maxAttempts - (attemptCount + 1),
-//       maxAttempts,
-//       certificateGenerated,
-//     });
-//   } catch (e) {
-//     console.error("POST /assessments/:id/attempts error:", e);
-//     res.status(500).json({ error: "Internal error" });
-//   }
-// });
 
 router.post("/assessments/:id/attempts", protect, async (req, res) => {
   try {

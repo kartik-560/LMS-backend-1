@@ -663,25 +663,15 @@ router.get("/courses", protect, async (req, res) => {
         });
       }
 
-      // Build department-aware assignment filter
-      const assignmentFilter = {
-        collegeId: userCollegeId,
-      };
-
-      if (userDepartmentId) {
-        // Show courses for their department OR college-wide courses
-        assignmentFilter.OR = [
-          { departmentId: userDepartmentId }, // Their specific department
-          { departmentId: null }, // College-wide courses
-        ];
-      } else {
-        // No department → show only college-wide courses
-        assignmentFilter.departmentId = null;
+      if (!userDepartmentId) {
+        console.log("❌ Instructor has no departmentId");
+        return res.status(400).json({
+          error: "You must be assigned to a department to view courses",
+        });
       }
 
       console.log(
-        "[INSTRUCTOR FILTER]",
-        JSON.stringify(assignmentFilter, null, 2)
+        `[INSTRUCTOR FILTER] College: ${userCollegeId}, Department: ${userDepartmentId}`
       );
 
       const where = {
@@ -689,7 +679,7 @@ router.get("/courses", protect, async (req, res) => {
         CoursesAssigned: {
           some: {
             collegeId: userCollegeId,
-            OR: [{ departmentId: userDepartmentId }, { departmentId: null }],
+            departmentId: userDepartmentId, // ✅ EXACT department match only
           },
         },
       };
@@ -706,9 +696,7 @@ router.get("/courses", protect, async (req, res) => {
       ]);
 
       console.log(
-        `[INSTRUCTOR] Found ${rows.length} courses (Dept: ${
-          userDepartmentId || "none"
-        })`
+        `[INSTRUCTOR] Found ${rows.length} courses for department ${userDepartmentId}`
       );
 
       return res.json({
@@ -721,6 +709,7 @@ router.get("/courses", protect, async (req, res) => {
 
     if (normalizedRole === "STUDENT") {
       const resolvedCollegeId = String(collegeId || req.user.collegeId || "");
+      const resolvedDepartmentId = req.user.departmentId;
 
       if (!resolvedCollegeId) {
         return res.status(400).json({
@@ -728,19 +717,28 @@ router.get("/courses", protect, async (req, res) => {
         });
       }
 
+      if (!resolvedDepartmentId) {
+        return res.status(400).json({
+          error: "You must be assigned to a department to view courses",
+        });
+      }
+
       const sid = String(req.user.id);
 
+      // ✅ CATALOG VIEW: Only department-specific courses
       if (view === "catalog") {
-        // const where = {
-        //   ...commonFilter,
-        //   CoursesAssigned: { some: { collegeId: resolvedCollegeId } },
-        // };
+        console.log(
+          `[STUDENT CATALOG FILTER] College: ${resolvedCollegeId}, Department: ${resolvedDepartmentId}`
+        );
+
         const where = {
           ...commonFilter,
-          OR: [
-            { collegeId: resolvedCollegeId },
-            { CoursesAssigned: { some: { collegeId: resolvedCollegeId } } },
-          ],
+          CoursesAssigned: {
+            some: {
+              collegeId: resolvedCollegeId,
+              departmentId: resolvedDepartmentId, // ✅ EXACT department match only
+            },
+          },
         };
 
         const [rows, total] = await Promise.all([
@@ -753,6 +751,11 @@ router.get("/courses", protect, async (req, res) => {
           }),
           prisma.course.count({ where }),
         ]);
+
+        console.log(
+          `[STUDENT CATALOG] Found ${rows.length} courses for department ${resolvedDepartmentId}`
+        );
+
         return res.json({
           page: p,
           pageSize: ps,
@@ -761,17 +764,19 @@ router.get("/courses", protect, async (req, res) => {
         });
       }
 
+      // ✅ ENROLLED VIEW: Only approved enrollments in their department
       const whereEnroll = {
         studentId: sid,
         status: "APPROVED",
-        AND: [
-          { course: commonFilter },
-          {
-            course: {
-              CoursesAssigned: { some: { collegeId: resolvedCollegeId } },
+        course: {
+          ...commonFilter,
+          CoursesAssigned: {
+            some: {
+              collegeId: resolvedCollegeId,
+              departmentId: resolvedDepartmentId, // ✅ EXACT department match only
             },
           },
-        ],
+        },
       };
 
       const [enrolls, total] = await Promise.all([
@@ -786,6 +791,10 @@ router.get("/courses", protect, async (req, res) => {
         }),
         prisma.enrollment.count({ where: whereEnroll }),
       ]);
+
+      console.log(
+        `[STUDENT ENROLLED] Found ${enrolls.length} enrollments for department ${resolvedDepartmentId}`
+      );
 
       return res.json({
         page: p,

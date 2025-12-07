@@ -1556,31 +1556,36 @@ router.get("/me", async (req, res, next) => {
       where: { id: req.user.id },
       select: {
         id: true,
-        fullName: true,
-        email: true,
         role: true,
-        authProvider: true,
-        isEmailVerified: true,
-        isActive: true,
-        lastLogin: true,
-        createdAt: true,
-        updatedAt: true,
-        permissions: true,
-        year: true,
-        department: true,
-        mobile: true,
-        collegeId: true,
+        college: {
+          select: {
+            id: true,
+            permissions: true, // JSONB from colleges table
+          },
+        },
       },
     });
-    if (!me)
+
+    if (!me) {
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
-    res.status(200).json({ success: true, data: { user: me } });
+    }
+
+    // Optional: flatten to only what frontend needs
+    const payload = {
+      id: me.id,
+      role: me.role,
+      collegeId: me.college?.id || null,
+      collegePermissions: me.college?.permissions || null,
+    };
+
+    return res.status(200).json({ success: true, data: { user: payload } });
   } catch (err) {
     next(err);
   }
 });
+
 
 router.put(
   "/me",

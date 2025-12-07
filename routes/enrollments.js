@@ -374,9 +374,7 @@ router.get("/enrollments", async (req, res) => {
             chapterProgress: {
               where: {
                 // courseId is on Chapter, so filter through chapter relation
-                chapter: courseId
-                  ? { courseId: String(courseId) }
-                  : undefined,
+                chapter: courseId ? { courseId: String(courseId) } : undefined,
                 // extra safety: same college for the user owning the progress
                 student: collegeId
                   ? { collegeId: String(collegeId) }
@@ -1150,11 +1148,12 @@ router.get(
     try {
       const instructorId = req.user.id;
 
-      // Get instructor's collegeId
+      // ✅ Get instructor's collegeId AND departmentId
       const instructor = await prisma.user.findUnique({
         where: { id: instructorId },
         select: {
           collegeId: true,
+          departmentId: true, // ✅ Added departmentId
         },
       });
 
@@ -1165,11 +1164,24 @@ router.get(
         });
       }
 
-      // Get all enrollments where student belongs to the same college
+      // ✅ Validate department assignment
+      if (!instructor?.departmentId) {
+        return res.status(400).json({
+          success: false,
+          error: "Instructor has no department assigned",
+        });
+      }
+
+      console.log(
+        `[INSTRUCTOR STUDENTS] College: ${instructor.collegeId}, Department: ${instructor.departmentId}`
+      );
+
+      // ✅ Get enrollments where student belongs to same college AND department
       const enrollments = await prisma.enrollment.findMany({
         where: {
           student: {
-            collegeId: instructor.collegeId,
+            collegeId: instructor.collegeId, // ✅ Same college
+            departmentId: instructor.departmentId, // ✅ Same department
           },
         },
         select: {
@@ -1178,6 +1190,14 @@ router.get(
               id: true,
               fullName: true,
               email: true,
+              departmentId: true, // ✅ Include for verification
+              department: {
+                // ✅ Optional: include department details
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
             },
           },
         },
@@ -1185,6 +1205,10 @@ router.get(
       });
 
       const students = enrollments.map((e) => e.student).filter(Boolean);
+
+      console.log(
+        `[INSTRUCTOR STUDENTS] Found ${students.length} students in department ${instructor.departmentId}`
+      );
 
       res.json({ success: true, data: students });
     } catch (error) {
