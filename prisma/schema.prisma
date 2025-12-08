@@ -252,6 +252,7 @@ model Assessment {
   scope            String               @default("chapter")
   timeLimitSeconds Int?
   maxAttempts      Int                  @default(1)
+  passingMark      Int?
   isPublished      Boolean              @default(true)
   order            Int?
   courseId         String?
