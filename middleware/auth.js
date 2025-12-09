@@ -219,25 +219,16 @@ export async function requireCourseCreation(req, res, next) {
           permissions = null;
         }
       }
-      
-      // Check if this user has canCreateCourses permission
-      // Structure: { "adminToggles": { "userId": { "canCreateCourses": true } } }
+
       const adminToggles = permissions?.adminToggles || {};
       const userPermissions = adminToggles[userId];
       
-      console.log('🔍 College permissions check:', {
-        userId,
-        collegeId,
-        userPermissions,
-        canCreateCourses: userPermissions?.canCreateCourses
-      });
       
       if (userPermissions?.canCreateCourses === true) {
-        console.log('✅ Allowed: Admin/Instructor with canCreateCourses permission');
+
         return next();
       }
       
-      console.log('❌ Denied: No canCreateCourses permission in college settings');
       return res.status(403).json({ 
         error: "You don't have permission to create courses",
         hint: "Contact your college administrator to enable 'Create Courses' permission for your account"
@@ -249,7 +240,6 @@ export async function requireCourseCreation(req, res, next) {
     }
   }
   
-  console.log('❌ Denied: Invalid role');
   return res.status(403).json({ 
     error: "You don't have permission to create courses"
   });

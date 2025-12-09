@@ -37,8 +37,11 @@ router.get("/overview", requireAdmin, async (req, res) => {
 
     const certificatesGenerated = await prisma.certificate.count({
       where: {
-        course: { collegeId: collegeId },
-      },
+          user: {
+            collegeId: collegeId,
+            role: "student"
+          }
+        }
     });
 
     res.json({

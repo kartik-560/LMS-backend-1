@@ -35,14 +35,11 @@ router.get("/course/:courseId/completed", protect, async (req, res) => {
   try {
     const studentId = req.user.id;
     const courseId = String(req.params.courseId);
-    
 
     const rows = await prisma.chapterProgress.findMany({
       where: { studentId, isCompleted: true, chapter: { courseId } },
       select: { chapterId: true },
     });
-
-   
 
     res.set("Cache-Control", "no-store");
     return res.json({ data: rows.map((r) => r.chapterId) });
@@ -57,7 +54,7 @@ router.get("/course/:courseId/summary", protect, async (req, res) => {
     const studentId = req.user.id;
     const courseId = String(req.params.courseId);
 
-    // Get chapter counts
+    // 1) Chapters
     const [chaptersTotal, chaptersDone] = await Promise.all([
       prisma.chapter.count({ where: { courseId } }),
       prisma.chapterProgress.count({
@@ -65,36 +62,35 @@ router.get("/course/:courseId/summary", protect, async (req, res) => {
       }),
     ]);
 
-    // Get assessment attempts to count how many tests were taken
+    // 2) Tests: average score + how many tests taken
     const attempts = await prisma.assessmentAttempt.findMany({
       where: {
         studentId,
         status: "submitted",
         assessment: { courseId },
+        score: { not: null },
       },
-      select: { assessmentId: true },
+      select: { assessmentId: true, score: true },
     });
 
-    // Count the number of unique tests taken
-    const uniqueTestIds = new Set(attempts.map((a) => a.assessmentId));
-    const taken = uniqueTestIds.size;
-    const averagePercent = 0; // Set to 0 since we are not calculating it
+    const taken = attempts.length;
 
-    // Get total time spent
-    const timeAgg = await prisma.chapterProgress.aggregate({
-      where: { studentId, chapter: { courseId } },
-      _sum: { timeSpent: true },
-    });
-    const totalTimeSpent = Number(timeAgg._sum.timeSpent ?? 0);
+    let averagePercent = 0;
+    if (taken > 0) {
+      const totalScore = attempts.reduce(
+        (sum, a) => sum + Number(a.score || 0),
+        0
+      );
+      averagePercent = Math.round(totalScore / taken);
+    }
 
-    // Return the final data
+    // 3) Response (no totalTimeSpent now)
     res.set("Cache-Control", "no-store");
     return res.json({
       data: {
         chapters: { done: chaptersDone, total: chaptersTotal },
         modules: { done: chaptersDone, total: chaptersTotal },
         tests: { averagePercent, taken },
-        totalTimeSpent,
       },
     });
   } catch (e) {
@@ -102,4 +98,5 @@ router.get("/course/:courseId/summary", protect, async (req, res) => {
     return res.status(500).json({ error: "Internal error" });
   }
 });
+
 export default router;

@@ -621,52 +621,8 @@ router.delete(
   }
 );
 
-router.post(
-  "/:collegeId/departments",
-  [
-    protect,
-    authorize("SUPERADMIN"),
-    body("name").exists().trim().isLength({ min: 2, max: 150 }),
-    handleValidationErrors,
-  ],
-  async (req, res, next) => {
-    try {
-      const collegeId = String(req.params.collegeId);
-      const college = await prisma.college.findUnique({
-        where: { id: collegeId },
-      });
-      if (!college)
-        return res
-          .status(404)
-          .json({ success: false, message: "College not found" });
 
-      // prevent obvious duplicates by name within a college
-      const dup = await prisma.department.findFirst({
-        where: {
-          collegeId,
-          name: { equals: String(req.body.name).trim(), mode: "insensitive" },
-        },
-      });
-      if (dup) {
-        return res.status(400).json({
-          success: false,
-          message: "Department already exists in this college",
-        });
-      }
-
-      const created = await prisma.department.create({
-        data: { name: String(req.body.name).trim(), collegeId },
-      });
-
-      res.status(201).json({ success: true, data: { department: created } });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-router.get(
-  "/:collegeId/departments",
+router.get("/:collegeId/departments",
   [protect, authorize("SUPERADMIN", "ADMIN")],
   async (req, res, next) => {
     try {
@@ -820,25 +776,6 @@ router.delete(
     }
   }
 );
-
-router.get("/departments", protect, async (req, res) => {
-  try {
-    const setting = await prisma.setting.findUnique({
-      where: { key: "departments" },
-    });
-
-    if (!setting) {
-      return res.status(404).json({ error: "Departments setting not found" });
-    }
-
-    const departments = setting.value;
-
-    res.json({ departments });
-  } catch (e) {
-    console.error("GET /settings/departments error:", e);
-    res.status(500).json({ error: "Internal error" });
-  }
-});
 
 router.get("/:collegeId/permissions", ensureSuperAdmin, async (req, res) => {
   const { collegeId } = req.params;

@@ -443,11 +443,10 @@ router.post("/signup-google", async (req, res) => {
 });
 
 router.post("/departments", async (req, res) => {
-  // 1. Use a try...catch block to handle potential database errors
   try {
     const { name, collegeId } = req.body;
 
-    // Basic validation remains the same
+    // Basic validation
     if (!name || !collegeId) {
       return res.status(400).json({
         success: false,
@@ -455,27 +454,67 @@ router.post("/departments", async (req, res) => {
       });
     }
 
-    // 2. Use Prisma to create the new department in the database
+    // Verify college exists and get its department limit
+    const college = await prisma.college.findUnique({
+      where: { id: collegeId },
+      include: {
+        _count: {
+          select: { departments: true },
+        },
+      },
+    });
+
+    if (!college) {
+      return res.status(404).json({
+        success: false,
+        message: "College not found.",
+      });
+    }
+
+    // Check department limit
+    if (college._count.departments >= college.departmentLimit) {
+      return res.status(400).json({
+        success: false,
+        message: `Department limit reached. This college can have maximum ${college.departmentLimit} department(s).`,
+      });
+    }
+
+    // Check for duplicate department name (case-insensitive)
+    const existingDepartment = await prisma.department.findFirst({
+      where: {
+        collegeId: collegeId,
+        name: {
+          equals: name.trim(),
+          mode: "insensitive",
+        },
+      },
+    });
+
+    if (existingDepartment) {
+      return res.status(400).json({
+        success: false,
+        message: "Department with this name already exists in this college.",
+      });
+    }
+
+    // Create the new department
     const newDepartment = await prisma.department.create({
       data: {
-        name: name,
+        name: name.trim(),
         collegeId: collegeId,
       },
     });
 
-    // 3. Send the actual new department object from the database as a response
     res.status(201).json({
       success: true,
       message: "Department created successfully.",
       data: newDepartment,
     });
   } catch (error) {
-    // 4. Catch any errors (like an invalid collegeId) and send an error response
     console.error("Error creating department:", error);
     res.status(500).json({
       success: false,
-      message:
-        "Failed to create department. The collegeId might be invalid or not exist.",
+      message: "Failed to create department. Please try again later.",
     });
   }
 });
@@ -1585,7 +1624,6 @@ router.get("/me", async (req, res, next) => {
     next(err);
   }
 });
-
 
 router.put(
   "/me",
