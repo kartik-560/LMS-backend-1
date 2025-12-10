@@ -1764,57 +1764,6 @@ router.put(
   }
 );
 
-// router.delete("/me", async (req, res, next) => {
-//   try {
-//     if (req.user.role !== "SUPERADMIN") {
-//       return res
-//         .status(403)
-//         .json({ success: false, message: "Not authorized to delete users" });
-//     }
-
-//     const targetUserId = req.query.targetId;
-//     if (!targetUserId) {
-//       return res
-//         .status(400)
-//         .json({ success: false, message: "targetId is required" });
-//     }
-
-//     const user = await prisma.user.findUnique({ where: { id: targetUserId } });
-//     if (!user) {
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "User not found" });
-//     }
-
-//     await prisma.$transaction(async (tx) => {
-//       await tx.assessmentAttempt.deleteMany({
-//         where: { studentId: targetUserId },
-//       });
-//       await tx.chapterProgress.deleteMany({
-//         where: { studentId: targetUserId },
-//       });
-//       await tx.enrollment.deleteMany({
-//         where: { studentId: targetUserId },
-//       });
-//       await tx.user.delete({ where: { id: targetUserId } });
-//     });
-
-//     return res.json({
-//       success: true,
-//       message: "User deleted successfully",
-//     });
-//   } catch (err) {
-//     if (err.code === "P2003") {
-//       return res.status(409).json({
-//         success: false,
-//         message:
-//           "Cannot delete due to related data. Consider soft delete (isActive=false).",
-//       });
-//     }
-//     return next(err);
-//   }
-// });
-
 router.delete("/admin/users", async (req, res, next) => {
   try {
     console.log("req.user:", req.user); // ← Check auth
@@ -1897,6 +1846,67 @@ router.delete("/admin/users", async (req, res, next) => {
     next(err);
   }
 });
+
+router.patch(
+  "/users/bulk/active",
+  protect,
+  authorize("ADMIN", "SUPERADMIN"),
+  async (req, res) => {
+    try {
+      const { userIds, isActive } = req.body;
+
+      if (!Array.isArray(userIds) || userIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "userIds must be a non-empty array",
+        });
+      }
+
+      if (typeof isActive !== "boolean") {
+        return res.status(400).json({
+          success: false,
+          message: "isActive must be a boolean",
+        });
+      }
+
+      const stringIds = userIds.map((id) => String(id));
+
+      // Use updateMany (doesn't throw if no records found)
+      const result = await prisma.user.updateMany({
+        where: {
+          id: { in: stringIds },
+        },
+        data: { isActive: isActive },
+      });
+
+      // Fetch updated users
+      const updatedUsers = await prisma.user.findMany({
+        where: {
+          id: { in: stringIds },
+        },
+        select: {
+          id: true,
+          isActive: true,
+          fullName: true,
+          email: true,
+          role: true,
+        },
+      });
+
+      res.json({
+        success: true,
+        count: result.count,
+        data: updatedUsers,
+      });
+    } catch (err) {
+      console.error("Error updating users active status", err);
+      res.status(500).json({
+        success: false,
+        message: "Unable to update users status",
+      });
+    }
+  }
+);
 
 router.patch(
   "/users/:id/active",
