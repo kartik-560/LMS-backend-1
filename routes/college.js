@@ -46,6 +46,7 @@ router.post(
     body("studentLimit").optional().isInt({ min: 1 }),
     body("adminLimit").optional().isInt({ min: 1 }),
     body("instructorLimit").optional().isInt({ min: 1 }),
+     body("departmentLimit").optional().isInt({ min: 1 }),
     handleValidationErrors,
   ],
   async (req, res, next) => {
@@ -59,6 +60,7 @@ router.post(
         studentLimit: asIntOrNull(req.body.studentLimit) ?? 1,
         adminLimit: asIntOrNull(req.body.adminLimit) ?? 1,
         instructorLimit: asIntOrNull(req.body.instructorLimit) ?? 1,
+        departmentLimit: asIntOrNull(req.body.departmentLimit) ?? 1,
       };
 
       const dupe = await prisma.college.findFirst({
