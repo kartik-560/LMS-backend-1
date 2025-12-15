@@ -35,6 +35,7 @@ router.get("/courses/:courseId/final-test", protect, async (req, res) => {
         isPublished: true,
         timeLimitSeconds: true,
         maxAttempts: true,
+        createdAt: true,
       },
     });
 

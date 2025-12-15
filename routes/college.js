@@ -46,7 +46,7 @@ router.post(
     body("studentLimit").optional().isInt({ min: 1 }),
     body("adminLimit").optional().isInt({ min: 1 }),
     body("instructorLimit").optional().isInt({ min: 1 }),
-     body("departmentLimit").optional().isInt({ min: 1 }),
+    body("departmentLimit").optional().isInt({ min: 1 }),
     handleValidationErrors,
   ],
   async (req, res, next) => {
@@ -623,8 +623,8 @@ router.delete(
   }
 );
 
-
-router.get("/:collegeId/departments",
+router.get(
+  "/:collegeId/departments",
   [protect, authorize("SUPERADMIN", "ADMIN")],
   async (req, res, next) => {
     try {
@@ -869,7 +869,7 @@ router.put(
   ensureSuperAdmin,
   async (req, res) => {
     const { collegeId, userId } = req.params;
-    const { canCreateCourses, canCreateTests, canManageTests } = req.body || {};
+        const patch = req.body || {};
 
     const college = await prisma.college.findUnique({
       where: { id: collegeId },
@@ -881,10 +881,16 @@ router.put(
 
     const adminToggles = prev.adminToggles || {};
 
+    const existingUserPerms = adminToggles[userId] || {
+      canCreateCourses: false,
+      canCreateTests: false,
+      canManageTests: false,
+    };
+
+    // ✅ Merge: Keep existing + update only what's in the patch
     adminToggles[userId] = {
-      canCreateCourses: !!canCreateCourses,
-      canCreateTests: !!canCreateTests,
-      canManageTests: !!canManageTests,
+      ...existingUserPerms, // Keep all existing permissions
+      ...patch, // Override only the ones being changed
     };
 
     const updated = await prisma.college.update({
