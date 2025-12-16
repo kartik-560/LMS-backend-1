@@ -917,93 +917,76 @@ router.patch(
   }
 );
 
-// router.delete("/courses/:id", requireSuperAdmin, async (req, res) => {
-//   const { id } = req.params;
+router.delete(
+  "/courses/:id",
+  requireAnyRole("SUPERADMIN", "ADMIN"),
+  async (req, res) => {
+    const { id } = req.params;
 
-//   await prisma.assessmentAttempt.deleteMany({
-//     where: { assessment: { courseId: id } },
-//   });
-//   await prisma.assessmentQuestion.deleteMany({
-//     where: { assessment: { courseId: id } },
-//   });
-//   await prisma.assessment.deleteMany({ where: { courseId: id } });
+    await prisma.$transaction(
+      async (tx) => {
+        const now = new Date();
 
-//   await prisma.chapterProgress.deleteMany({
-//     where: { chapter: { courseId: id } },
-//   });
-//   await prisma.chapter.deleteMany({ where: { courseId: id } });
+        await tx.assessmentAttempt.updateMany({
+          where: { assessment: { courseId: id } },
+          data: { deletedAt: now },
+        });
 
-//   await prisma.courseReview.deleteMany({ where: { courseId: id } });
-//   await prisma.enrollment.deleteMany({ where: { courseId: id } });
-//   await prisma.coursesAssigned.deleteMany({ where: { courseId: id } });
+        await tx.assessmentQuestion.updateMany({
+          where: { assessment: { courseId: id } },
+          data: { deletedAt: now },
+        });
 
-//   await prisma.course.delete({ where: { id } });
-//   res.json({ ok: true });
-// });
+        // Soft delete assessments
+        await tx.assessment.updateMany({
+          where: { courseId: id },
+          data: { deletedAt: now },
+        });
 
-router.delete("/courses/:id", requireSuperAdmin, async (req, res) => {
-  const { id } = req.params;
+        await tx.chapterProgress.updateMany({
+          where: { chapter: { courseId: id } },
+          data: { deletedAt: now },
+        });
 
-  await prisma.$transaction(async (tx) => {
-    const now = new Date();
+        // Soft delete chapters
+        await tx.chapter.updateMany({
+          where: { courseId: id },
+          data: { deletedAt: now },
+        });
 
-    // Soft delete assessment attempts related to this course's assessments
-    await tx.assessmentAttempt.updateMany({
-      where: { assessment: { courseId: id } },
-      data: { deletedAt: now },
-    });
+        // Soft delete enrollments
+        await tx.enrollment.updateMany({
+          where: { courseId: id },
+          data: { deletedAt: now },
+        });
 
-    // Soft delete assessment questions related to this course's assessments
-    await tx.assessmentQuestion.updateMany({
-      where: { assessment: { courseId: id } },
-      data: { deletedAt: now },
-    });
+        // Soft delete courses assigned
+        await tx.coursesAssigned.updateMany({
+          where: { courseId: id },
+          data: { deletedAt: now },
+        });
 
-    // Soft delete assessments
-    await tx.assessment.updateMany({
-      where: { courseId: id },
-      data: { deletedAt: now },
-    });
+        // Soft delete certificates
+        await tx.certificate.updateMany({
+          where: { courseId: id },
+          data: { deletedAt: now },
+        });
 
-    // Soft delete chapter progress related to this course's chapters
-    await tx.chapterProgress.updateMany({
-      where: { chapter: { courseId: id } },
-      data: { deletedAt: now },
-    });
+        // Finally, soft delete the course
+        await tx.course.update({
+          where: { id },
+          data: { deletedAt: now },
+        });
+      },
+      {
+        maxWait: 10000,
+        timeout: 15000,
+      }
+    );
 
-    // Soft delete chapters
-    await tx.chapter.updateMany({
-      where: { courseId: id },
-      data: { deletedAt: now },
-    });
-
-    // Soft delete enrollments
-    await tx.enrollment.updateMany({
-      where: { courseId: id },
-      data: { deletedAt: now },
-    });
-
-    // Soft delete courses assigned
-    await tx.coursesAssigned.updateMany({
-      where: { courseId: id },
-      data: { deletedAt: now },
-    });
-
-    // Soft delete certificates
-    await tx.certificate.updateMany({
-      where: { courseId: id },
-      data: { deletedAt: now },
-    });
-
-    // Finally, soft delete the course
-    await tx.course.update({
-      where: { id },
-      data: { deletedAt: now },
-    });
-  });
-
-  res.json({ ok: true });
-});
+    res.json({ ok: true });
+  }
+);
 
 router.get("/courses/:id", courseDetailHandler);
 

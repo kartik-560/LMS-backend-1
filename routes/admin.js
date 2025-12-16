@@ -61,35 +61,6 @@ router.get("/overview", requireAdmin, async (req, res) => {
   }
 });
 
-// router.get("/instructors", requireAdmin, async (req, res) => {
-//   const collegeId = req.user.collegeId;
-
-//   const rows = await prisma.user.findMany({
-//     where: { role: "instructor", collegeId },
-//     select: {
-//       id: true,
-//       fullName: true,
-//       email: true,
-//       isActive: true,
-//       lastLogin: true,
-//       department: {
-//         select: {
-//           id: true,
-//           name: true,
-//           _count: {
-//             select: {
-//               CoursesAssigned: true,
-//               Course: true,
-//             },
-//           },
-//         },
-//       },
-//     },
-//     orderBy: { fullName: "asc" },
-//   });
-//   res.json({ data: rows });
-// });
-
 router.get("/instructors", requireAdmin, async (req, res) => {
   const collegeId = req.user.collegeId;
 
@@ -200,75 +171,6 @@ router.get("/students", requireAdmin, async (req, res) => {
     res.status(500).json({ error: "Internal error" });
   }
 });
-
-// router.get("/courses", requireAdmin, async (req, res) => {
-//   try {
-//     const collegeId = req.user.collegeId;
-
-//     if (!collegeId) {
-//       return res.status(400).json({
-//         error: "You must be assigned to a college",
-//       });
-//     }
-
-//     const { search, status, category } = req.query;
-
-//     // Build WHERE clause: courses with collegeId OR assigned to college
-//     const where = {
-//       OR: [
-//         { collegeId: collegeId }, // Courses created by admin with collegeId
-//         { CoursesAssigned: { some: { collegeId } } }, // Courses assigned to college
-//       ],
-//       ...(search ? { title: { contains: search, mode: "insensitive" } } : {}),
-//       ...(status ? { status } : {}),
-//       ...(category ? { category } : {}),
-//     };
-
-//     const rows = await prisma.course.findMany({
-//       where,
-//       select: {
-//         id: true,
-//         title: true,
-//         description: true,
-//         status: true,
-//         thumbnail: true,
-//         category: true,
-//         collegeId: true, // Include this for debugging
-//         createdAt: true,
-//         updatedAt: true,
-//         _count: {
-//           select: {
-//             chapters: true,
-//             enrollments: true,
-//           },
-//         },
-//       },
-//       orderBy: { createdAt: "desc" },
-//     });
-
-//     const data = rows.map((r) => ({
-//       id: r.id,
-//       title: r.title,
-//       description: r.description,
-//       status: r.status,
-//       thumbnail: r.thumbnail,
-//       category: r.category,
-//       totalChapters: r._count.chapters ?? 0,
-//       totalModules: 0, // Add this if your frontend expects it
-//       studentCount: r._count.enrollments ?? 0,
-//       level: r.level || null, // Add if your frontend expects it
-//       createdAt: r.createdAt,
-//       updatedAt: r.updatedAt,
-//     }));
-
-//     console.log("✅ Admin courses found:", data.length);
-
-//     res.json({ data });
-//   } catch (err) {
-//     console.error("GET /admin/courses error:", err);
-//     return res.status(500).json({ error: "Internal server error" });
-//   }
-// });
 
 router.get("/courses", requireAdmin, async (req, res) => {
   try {
